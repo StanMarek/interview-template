@@ -1,0 +1,191 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.stanmarek</groupId>
+    <artifactId>interview-template</artifactId>
+    <version>1.0-SNAPSHOT</version>
+
+    <properties>
+        <maven.compiler.release>24</maven.compiler.release>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+
+        <!-- Dependency versions -->
+        <junit.version>5.14.2</junit.version>
+        <assertj.version>3.27.7</assertj.version>
+        <guava.version>33.5.0-jre</guava.version>
+        <commons-lang3.version>3.20.0</commons-lang3.version>
+        <commons-collections4.version>4.5.0</commons-collections4.version>
+        <commons-math3.version>3.6.1</commons-math3.version>
+        <eclipse-collections.version>13.0.0</eclipse-collections.version>
+        <jgrapht.version>1.5.2</jgrapht.version>
+        <lombok.version>1.18.42</lombok.version>
+        <jmh.version>1.37</jmh.version>
+        <vavr.version>0.11.0</vavr.version>
+    </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.junit</groupId>
+                <artifactId>junit-bom</artifactId>
+                <version>${junit.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <dependencies>
+
+        <!-- ==================== -->
+        <!-- TESTING & ASSERTIONS -->
+        <!-- ==================== -->
+
+        <!-- JUnit 5 - testing framework -->
+        <!-- @Test, @ParameterizedTest, @CsvSource, @MethodSource, @Nested -->
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- AssertJ - fluent assertions -->
+        <!-- assertThat(list).containsExactly(...), isSorted(), hasSize() -->
+        <dependency>
+            <groupId>org.assertj</groupId>
+            <artifactId>assertj-core</artifactId>
+            <version>${assertj.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- ======================== -->
+        <!-- COLLECTIONS & UTILITIES  -->
+        <!-- ======================== -->
+
+        <!-- Google Guava - the most useful library for interviews -->
+        <!-- Multimap, BiMap, Multiset, Table, Graph API, Range, Sets/Lists/Maps utilities -->
+        <dependency>
+            <groupId>com.google.guava</groupId>
+            <artifactId>guava</artifactId>
+            <version>${guava.version}</version>
+        </dependency>
+
+        <!-- Apache Commons Lang - Pair/Triple, StringUtils, ArrayUtils -->
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-lang3</artifactId>
+            <version>${commons-lang3.version}</version>
+        </dependency>
+
+        <!-- Apache Commons Collections - PatriciaTrie, Bag, BidiMap -->
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-collections4</artifactId>
+            <version>${commons-collections4.version}</version>
+        </dependency>
+
+        <!-- Apache Commons Math - GCD, LCM, combinatorics, Fraction -->
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-math3</artifactId>
+            <version>${commons-math3.version}</version>
+        </dependency>
+
+        <!-- Eclipse Collections - primitive collections (IntList, IntIntMap), rich functional API -->
+        <dependency>
+            <groupId>org.eclipse.collections</groupId>
+            <artifactId>eclipse-collections</artifactId>
+            <version>${eclipse-collections.version}</version>
+        </dependency>
+
+        <!-- ====== -->
+        <!-- GRAPHS -->
+        <!-- ====== -->
+
+        <!-- JGraphT - graph data structures & algorithms -->
+        <!-- Dijkstra, BFS/DFS iterators, topological sort, cycle detection, MST -->
+        <dependency>
+            <groupId>org.jgrapht</groupId>
+            <artifactId>jgrapht-core</artifactId>
+            <version>${jgrapht.version}</version>
+        </dependency>
+
+        <!-- ===================== -->
+        <!-- BOILERPLATE REDUCTION -->
+        <!-- ===================== -->
+
+        <!-- Lombok - @Data, @Value, @Builder, @EqualsAndHashCode for custom Node/Edge/State classes -->
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <version>${lombok.version}</version>
+            <scope>provided</scope>
+        </dependency>
+
+        <!-- ====================== -->
+        <!-- FUNCTIONAL PROGRAMMING -->
+        <!-- ====================== -->
+
+        <!-- Vavr - Tuple2-Tuple8, Either, persistent collections, pattern matching -->
+        <dependency>
+            <groupId>io.vavr</groupId>
+            <artifactId>vavr</artifactId>
+            <version>${vavr.version}</version>
+        </dependency>
+
+        <!-- ============ -->
+        <!-- BENCHMARKING -->
+        <!-- ============ -->
+
+        <!-- JMH - microbenchmarking to compare algorithm performance -->
+        <dependency>
+            <groupId>org.openjdk.jmh</groupId>
+            <artifactId>jmh-core</artifactId>
+            <version>${jmh.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.openjdk.jmh</groupId>
+            <artifactId>jmh-generator-annprocess</artifactId>
+            <version>${jmh.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!-- Compiler plugin - required for Lombok annotation processing on JDK 23+ -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.15.0</version>
+                <configuration>
+                    <annotationProcessorPaths>
+                        <path>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                            <version>${lombok.version}</version>
+                        </path>
+                        <path>
+                            <groupId>org.openjdk.jmh</groupId>
+                            <artifactId>jmh-generator-annprocess</artifactId>
+                            <version>${jmh.version}</version>
+                        </path>
+                    </annotationProcessorPaths>
+                </configuration>
+            </plugin>
+
+            <!-- Surefire plugin - required to run JUnit 5 tests -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.5.4</version>
+            </plugin>
+        </plugins>
+    </build>
+
+</project>
