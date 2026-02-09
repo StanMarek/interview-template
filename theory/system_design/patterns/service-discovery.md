@@ -1,0 +1,50 @@
+# Service Discovery
+
+## What It Is
+In a microservices architecture with dynamically scaling instances, service discovery is the mechanism by which services find and communicate with each other. Instances come and go (autoscaling, deploys, failures), so hardcoded IP addresses don't work.
+
+## Patterns
+
+### Client-Side Discovery
+The client queries a service registry to get available instances, then load-balances among them.
+- **Flow**: Client → Registry (get instances) → Client picks one → Direct call to instance
+- **Pros**: Client can implement smart LB (least connections, latency-based)
+- **Cons**: Coupling — every client must implement discovery logic
+- **Examples**: Netflix Eureka + Ribbon, Consul + custom client
+
+### Server-Side Discovery
+The client calls a load balancer/router, which queries the registry and routes the request.
+- **Flow**: Client → Load Balancer → Registry lookup → Route to instance
+- **Pros**: Clients are simple (just call one endpoint); discovery logic centralized
+- **Cons**: LB is an extra hop and potential bottleneck/SPOF
+- **Examples**: AWS ALB, Kubernetes Services, Nginx + Consul
+
+### DNS-Based Discovery
+Services register DNS records. Clients resolve the service name to an IP.
+- **Pros**: Universal, works with any language/framework
+- **Cons**: DNS TTL caching causes staleness; limited to IP:port (no metadata)
+- **Examples**: Consul DNS, Kubernetes CoreDNS, AWS Cloud Map
+
+### Service Mesh
+Sidecar proxies handle discovery, routing, retries, and mTLS transparently. Application code is unaware.
+- **Examples**: Istio (Envoy), Linkerd
+
+## Service Registry
+A database of available service instances with their network locations and health status.
+- **Self-registration**: Service registers itself on startup, deregisters on shutdown. Heartbeats maintain registration.
+- **Third-party registration**: A separate registrar watches for new instances (e.g., Kubernetes controller) and registers them.
+
+### Registry Implementations
+| Tool | Type | Notes |
+|------|------|-------|
+| etcd | CP (Raft consensus) | Key-value store, Kubernetes backing store |
+| Consul | CP (Raft) | Service mesh + DNS + KV + health checks |
+| ZooKeeper | CP (ZAB) | Mature, complex, used by Kafka/Hadoop |
+| Eureka | AP | Netflix, peer-to-peer replication |
+| Kubernetes | Built-in | Services + Endpoints + CoreDNS |
+
+## Possible Interview Questions
+1. "How do microservices find each other?"
+2. "Compare client-side vs server-side service discovery."
+3. "What happens if the service registry goes down?"
+4. "How does Kubernetes handle service discovery?"
