@@ -1,0 +1,50 @@
+At Tesco, we strive to serve our customers a little better every day. Over the years we have developed a rich selection of discounts to benefit our customers.
+As the discount system got very complex, we would like to re-write it from scratch (what could go wrong?). Your goal today is to implement an MVP of the new system - apply the relevant discounts to customer's cart.
+You will be given a cart with products and their prices, as well as a list of discounts that might apply to the cart. Please calculate the discounted prices for items in the cart. Keep in mind that other kinds of discounts will be added to the system in future.
+Given a cart like this:
+
+Java
+- name: Ham Sandwich
+  category: sandwich
+  count: 1
+  price: 3 pounds
+- name: Cheese Sandwich
+  category: sandwich
+  count: 2
+  price: 3 pounds
+- name: Orange Juice
+  category: drink
+  count: 1
+  price: 1.85 pound
+- name: Apple Juice
+  category: drink
+  count: 2
+  price: 5.2 pounds
+
+
+And those discounts:
+MostExpensiveItemPercentageDiscount: 30% off for the most expensive cart item
+SetAmountVoucherPerCategory: voucher for a maximum 5 pounds off the overall spend in the sandwich category
+Please return a discounted shopping cart:
+
+Java
+- name: Ham Sandwich
+  category: sandwich
+  count: 1
+  price: 3 pounds
+  discounted price: 0 pounds
+- name: Cheese Sandwich
+  category: sandwich
+  count: 2
+  price: 3 pounds
+  discounted price: 1 pound
+- name: Orange Juice
+  category: drink
+  count: 1
+  price: 1.85 pounds
+  discounted price: 1.85 pound
+- name: Apple Juice
+  category: drink
+  count: 2
+  price: 5.2 pounds
+  discounted price: 3.64 pounds
