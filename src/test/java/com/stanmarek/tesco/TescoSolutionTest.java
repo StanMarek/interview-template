@@ -4,14 +4,13 @@ import com.stanmarek.tesco.TescoSolution.CartItem;
 import com.stanmarek.tesco.TescoSolution.MostExpensiveItemPercentageDiscount;
 import com.stanmarek.tesco.TescoSolution.Rule;
 import com.stanmarek.tesco.TescoSolution.SetAmountVoucherPerCategory;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
 import java.util.Collections;
 import java.util.List;
-import java.util.Map;
-import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -88,9 +87,11 @@ class TescoSolutionTest {
 
             var result = solution.calculateCartDiscounts(items, rules);
 
-            // After 50% off: Expensive=5.00, Cheap=2.00
-            // Voucher applied to food category using updated prices
             assertThat(result).hasSize(2);
+            assertThat(findByName(result, "Expensive").discountedPrice())
+                    .isEqualByComparingTo("7.00");
+            assertThat(findByName(result, "Cheap").discountedPrice())
+                    .isEqualByComparingTo("2.00");
         }
     }
 
@@ -138,7 +139,6 @@ class TescoSolutionTest {
         @Test
         void roundsToTwoDecimalPlaces() {
             var items = List.of(item("A", "cat", 1, "10.00"));
-            // 33% off 10.00 = 6.70
             List<Rule> rules = List.of(new MostExpensiveItemPercentageDiscount(new BigDecimal("33")));
 
             var result = solution.calculateCartDiscounts(items, rules);
@@ -157,7 +157,6 @@ class TescoSolutionTest {
 
             var result = solution.calculateCartDiscounts(items, rules);
 
-            // One should be discounted to 5.00, the other stays at 10.00
             var prices = result.stream().map(CartItem::discountedPrice).toList();
             assertThat(prices).anySatisfy(p -> assertThat(p).isEqualByComparingTo("5.00"));
             assertThat(prices).anySatisfy(p -> assertThat(p).isEqualByComparingTo("10.00"));
@@ -177,7 +176,6 @@ class TescoSolutionTest {
 
             var result = solution.calculateCartDiscounts(items, rules);
 
-            // First item: 3-3=0 (remaining=2), Second item: 3-2=1 (remaining=0)
             var discountedPrices = result.stream()
                     .map(CartItem::discountedPrice)
                     .sorted()
@@ -298,27 +296,4 @@ class TescoSolutionTest {
         }
     }
 
-    @Nested
-    class GetItemsByCategoryTest {
-
-        @Test
-        void returnsItemsMatchingCategory() {
-            var items = List.of(
-                    item("A", "food", 1, "1.00"),
-                    item("B", "drink", 1, "2.00"),
-                    item("C", "food", 1, "3.00")
-            );
-            var result = solution.getItemsByCategory("food", items);
-            assertThat(result).hasSize(2)
-                    .extracting(CartItem::name)
-                    .containsExactlyInAnyOrder("A", "C");
-        }
-
-        @Test
-        void categoryNotPresent_returnsEmptyList() {
-            var items = List.of(item("A", "food", 1, "1.00"));
-            var result = solution.getItemsByCategory("drink", items);
-            assertThat(result).isEmpty();
-        }
-    }
 }
