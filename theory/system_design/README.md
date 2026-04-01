@@ -60,6 +60,13 @@ Map every concept to the real service name for each provider.
 | Azure | [azure.md](providers/azure.md) |
 | GCP | [gcp.md](providers/gcp.md) |
 
+### Practice Tracks
+Focused drill material for mock interviews and whiteboard sessions.
+
+| Topic | File |
+|-------|------|
+| System Design Interview Practice Tasks | [interview-practice-tasks.md](interview-practice-tasks.md) |
+
 ---
 
 ## 🧠 Interview Framework (Use This for Every Question)
