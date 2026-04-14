@@ -16,6 +16,9 @@
 | 10 | `10-binary-search.md` | Templates, rotated array, binary search on answer, 2D matrix search |
 | 11 | `11-backtracking.md` | Subsets, permutations, combination sum, N-Queens, grid backtracking |
 | 12 | `12-intervals-sorting-greedy.md` | Merge intervals, meeting rooms, sorting algorithms, greedy patterns |
+| 13 | `13-bit-manipulation.md` | XOR tricks, bit counting, masks, power-of-two, bitmask DP primer, Gosper's hack |
+| 14 | `14-math-and-number-theory.md` | GCD/LCM, modular arithmetic & inverse, fast exponentiation, sieve, nCk mod p, overflow-safe Java |
+| 15 | `15-string-algorithms.md` | KMP, Rabin-Karp rolling hash, Z-algorithm, expand-around-center, suffix array + Kasai LCP |
 
 ## Quick Problem → Pattern Lookup
 

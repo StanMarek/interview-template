@@ -63,7 +63,7 @@ If a subscriber can't keep up:
 
 | System | Type | Notes |
 |--------|------|-------|
-| Apache Kafka | Distributed event streaming | Topics with partitions, consumer groups |
+| Apache Kafka | Distributed event streaming | Topics with partitions, consumer groups. **Kafka 4.0 (2025) removed ZooKeeper** — KRaft (Raft-based metadata) is the only supported mode |
 | Google Pub/Sub | Managed pub/sub | At-least-once, push and pull delivery |
 | AWS SNS | Managed pub/sub | Fan-out to SQS, Lambda, HTTP, email |
 | Redis Pub/Sub | In-memory | Fire and forget (no persistence) |

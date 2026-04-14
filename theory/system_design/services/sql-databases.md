@@ -45,14 +45,21 @@ Indexes, query plan analysis (EXPLAIN), denormalization, materialized views.
 
 | Database | Strengths | Notes |
 |----------|-----------|-------|
-| **PostgreSQL** | Feature-rich, extensible, JSON support, full-text search | Best general-purpose RDBMS |
-| **MySQL** | Simple, fast reads, mature replication | Most widely deployed; InnoDB engine |
+| **PostgreSQL** | Feature-rich, extensible, JSON/JSONB, FTS, pgvector | Best general-purpose RDBMS. PG 17 (Sept 2024) improved VACUUM memory, logical replication failover; PG 18 (Sept 2025) shipped async I/O, UUIDv7, and skip-scan indexes. |
+| **MySQL** | Simple, fast reads, mature replication | Most widely deployed; InnoDB engine. MySQL 8.4 LTS (2024) is current. |
 | **SQL Server** | Enterprise, BI integration, .NET ecosystem | Microsoft shops |
 | **Oracle** | Enterprise, RAC for clustering, advanced features | Expensive, legacy enterprise |
-| **CockroachDB** | Distributed SQL, horizontal scaling, strong consistency | NewSQL: SQL interface + distributed architecture |
+| **CockroachDB** | Distributed SQL, horizontal scaling, strong consistency | NewSQL: SQL interface + distributed architecture. Relicensed to CockroachDB Software License (CSL, source-available) in 2024. |
 | **TiDB** | MySQL-compatible, distributed, HTAP | NewSQL |
-| **Vitess** | MySQL sharding middleware | Used by YouTube |
-| **Amazon Aurora** | Cloud-native MySQL/PostgreSQL, separated storage | 5x throughput of standard MySQL |
+| **Vitess** | MySQL sharding middleware | Used by YouTube, PlanetScale |
+| **Amazon Aurora** | Cloud-native MySQL/PostgreSQL, separated storage | 5x throughput of standard MySQL. Aurora DSQL (2024): active-active multi-region Postgres. |
+| **Neon / Supabase** | Serverless Postgres with branching / BaaS | Modern Postgres-based platforms with copy-on-write branching. |
+
+## Postgres Ecosystem Notes
+- **pgvector** (extension): Turns Postgres into a vector DB with `vector` type, HNSW and IVFFlat indexes. A major reason teams stick with Postgres for LLM/RAG workloads instead of adopting a dedicated vector DB.
+- **TimescaleDB** (extension): Time-series hypertables on top of Postgres (see time-series file).
+- **PostGIS** (extension): Geospatial — industry standard.
+- **Citus** (extension): Horizontal sharding/distributed Postgres, now owned by Microsoft.
 
 ## NewSQL
 Databases that provide the scalability of NoSQL with the ACID guarantees of SQL. They use distributed consensus (Raft/Paxos) and distributed storage.

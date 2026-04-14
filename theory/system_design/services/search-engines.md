@@ -1,7 +1,14 @@
-# Search Engines (Elasticsearch, Solr)
+# Search Engines (Elasticsearch, OpenSearch, Solr)
 
 ## What They Are
 Distributed search and analytics engines built on Apache Lucene. They create inverted indexes over documents to enable fast full-text search, aggregations, and near-real-time analytics.
+
+## The Elasticsearch / OpenSearch Split (INTERVIEW-RELEVANT)
+In 2021, Elastic relicensed Elasticsearch and Kibana from Apache 2.0 to dual SSPL / Elastic License (source-available, not OSS). AWS forked the last Apache-licensed version (7.10) as **OpenSearch**, now governed by the OpenSearch Software Foundation (Linux Foundation, 2024).
+- **Elasticsearch 8.x / 9.x (2025)**: Native vector search (HNSW), ES|QL query language, semantic search via ELSER, dense/sparse vector fields. In Aug 2024 Elastic added AGPLv3 as a third license option, making the OSS status debatable again.
+- **OpenSearch 2.x / 3.0 (2025)**: Apache 2.0, vector engine (k-NN via FAISS/Lucene/NMSLIB), ML Commons plugin, neural search.
+- **API compatibility**: Still largely compatible for basic operations; diverges on vector search, ML features, and newer APIs.
+- AWS OpenSearch Service, and many cloud-managed "Elasticsearch" offerings, actually run OpenSearch.
 
 ## Core Concept: Inverted Index
 Traditional index: document → words. Inverted index: word → documents.
@@ -42,6 +49,7 @@ An index is split into shards (Lucene indexes). Each shard can be on a different
 - **Geo search**: Geo-point, geo-shape queries, distance filtering
 - **Autocomplete**: Completion suggester, edge n-gram tokenizer
 - **Nested/parent-child**: Model relationships within documents
+- **Vector search (hybrid)**: Dense/sparse vectors + HNSW indexes for semantic/RAG workloads — both ES 8+ and OpenSearch 2+ compete with dedicated vector DBs (see vector-databases.md) by combining BM25 + kNN in one query.
 
 ## Elasticsearch vs Solr
 

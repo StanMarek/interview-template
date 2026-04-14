@@ -24,13 +24,15 @@
 |---------|-------------|-------|
 | Managed SQL Server | **Azure SQL Database** | Managed SQL Server, hyperscale, serverless options |
 | Managed MySQL/PostgreSQL | **Azure Database for MySQL/PostgreSQL** | Flexible Server deployment option |
-| Cloud-native distributed SQL | **Cosmos DB (SQL API)** | Multi-model, global distribution, tunable consistency |
-| Managed NoSQL (multi-model) | **Cosmos DB** | Document, graph, table, column-family APIs; 5 consistency levels |
-| Managed Redis | **Azure Cache for Redis** | Enterprise tiers available (Redis Enterprise) |
-| Search | **Azure AI Search** (formerly Cognitive Search) | Full-text search, AI enrichment, vector search |
-| Data warehouse | **Azure Synapse Analytics** | Unified analytics (SQL pools + Spark + Pipelines) |
-| Graph database | **Cosmos DB (Gremlin API)** | Graph API on Cosmos DB |
-| Time-series | **Azure Data Explorer (Kusto)** | Fast analytics on time-series and log data |
+| Distributed/horizontally-scaled PostgreSQL | **Cosmos DB for PostgreSQL** (formerly Hyperscale/Citus) | **Separate service from the Cosmos DB NoSQL engine** — Citus-based sharded Postgres; shares the "Cosmos DB" brand but is not one of the Cosmos DB APIs below |
+| Cloud-native NoSQL (global distribution) | **Cosmos DB for NoSQL** (renamed from SQL API) | Multi-model, global distribution, 5 tunable consistency levels |
+| Multi-API NoSQL (single engine) | **Cosmos DB** | APIs on the NoSQL engine: NoSQL, MongoDB (incl. vCore), Cassandra, Gremlin, Table. Cosmos DB for PostgreSQL is branded Cosmos DB but is a separate Citus-based product. |
+| Vector database | **Cosmos DB for MongoDB vCore** / **Azure AI Search (vector)** | Native vector search for RAG |
+| Managed Redis | **Azure Managed Redis** (GA 2025) / **Azure Cache for Redis** | New Managed Redis uses Redis Enterprise tech; legacy Cache for Redis still available |
+| Search | **Azure AI Search** (formerly Cognitive Search) | Full-text, semantic ranking, vector search, integrated vectorization |
+| Data warehouse | **Microsoft Fabric — Warehouse / Synapse Analytics** | Fabric (GA 2023) unifies Synapse, Data Factory, Power BI, ADLS on OneLake. Synapse still supported but Fabric is the strategic direction. |
+| Graph database | **Cosmos DB for Apache Gremlin** | Graph API on Cosmos DB |
+| Time-series / log analytics | **Azure Data Explorer (Kusto)** / **Fabric Real-Time Intelligence** | Fast analytics on time-series and log data |
 
 ## Networking
 | Concept | Azure Service | Notes |
@@ -42,7 +44,7 @@
 | L7 Load Balancer | **Application Gateway** | HTTP routing, SSL termination, WAF |
 | Global L7 LB + CDN | **Azure Front Door** | Global load balancing, CDN, WAF, SSL offload |
 | API Gateway | **Azure API Management (APIM)** | Full API lifecycle: gateway, developer portal, analytics |
-| Service mesh | **Open Service Mesh** or **Istio on AKS** | AKS add-ons |
+| Service mesh | **Istio-based service mesh on AKS** | Managed Istio add-on (Open Service Mesh was retired in 2024) |
 | Private connectivity | **Private Link** | Access services over private endpoint |
 
 ## Messaging & Streaming
@@ -74,11 +76,22 @@
 ## Data & Analytics
 | Concept | Azure Service | Notes |
 |---------|-------------|-------|
-| Unified analytics | **Synapse Analytics** | SQL + Spark + Pipelines in one service |
-| ETL / Data integration | **Azure Data Factory** | Managed ETL/ELT pipelines |
-| Real-time analytics | **Stream Analytics** | SQL over streaming data |
-| BI / visualization | **Power BI** | Industry-leading BI tool |
-| Databricks | **Azure Databricks** | Managed Spark + Delta Lake |
+| Unified analytics platform (SaaS) | **Microsoft Fabric** (GA 2023) | End-to-end SaaS: Data Factory, Synapse, Power BI, Real-Time Intelligence — all on OneLake (Delta/Parquet open format). Strategic successor to Synapse. |
+| Enterprise data warehouse | **Synapse Analytics** / **Fabric Warehouse** | SQL + Spark + Pipelines; Fabric is the newer unified experience |
+| ETL / Data integration | **Azure Data Factory** / **Fabric Data Factory** | Managed ETL/ELT pipelines |
+| Real-time analytics | **Stream Analytics** / **Fabric Real-Time Intelligence** | SQL over streaming data |
+| BI / visualization | **Power BI** | Industry-leading BI, integrated into Fabric |
+| Databricks | **Azure Databricks** | Managed Spark + Delta Lake + Unity Catalog |
+
+## AI / ML
+| Concept | Azure Service | Notes |
+|---------|-------------|-------|
+| Foundation models (GenAI) | **Azure OpenAI Service** / **Azure AI Foundry** | GPT-4, GPT-5, o-series, DALL-E, Whisper; AI Foundry (GA 2024) is the unified dev portal for agents, models, evaluations |
+| Model catalog (multi-provider) | **Azure AI Foundry Models** | Llama, Mistral, Cohere, DeepSeek, Phi + OpenAI models |
+| AI coding assistant | **GitHub Copilot** (first-party integration) | Copilot in IDE, CLI, and Azure Portal |
+| ML platform (end-to-end) | **Azure Machine Learning** | Build, train, deploy, MLOps |
+| Speech / Vision / NLP | **Azure AI Services** (formerly Cognitive Services) | Speech, Vision, Language, Document Intelligence, Content Safety |
+| Business AI assistants | **Microsoft 365 Copilot** / **Copilot Studio** | Enterprise copilots; Copilot Studio for custom agents |
 
 ## Cosmos DB — 5 Consistency Levels
 This is unique to Azure and frequently asked about:
@@ -95,16 +108,19 @@ This is unique to Azure and frequently asked about:
 - **Regions & Availability Zones**: Similar to AWS. Paired regions for geo-redundancy.
 - **Resource Groups**: Logical container for related resources (billing, access control).
 - **Azure Front Door**: Combines global LB + CDN + WAF — often the first entry point.
-- **Cosmos DB**: Azure's flagship globally-distributed database. Know the 5 consistency levels.
+- **Cosmos DB**: Azure's flagship globally-distributed database. Know the 5 consistency levels. APIs renamed in 2023 (e.g., SQL API → NoSQL API).
 - **Service Bus + Azure Functions**: Go-to pattern for async processing.
 - **Event Grid + Functions**: Reactive event-driven architecture.
-- **ADLS Gen2 + Synapse**: The Azure data lakehouse pattern.
+- **OneLake + Fabric**: "OneDrive for data" — single SaaS data estate across the org. Big strategic shift from Synapse.
+- **Azure OpenAI + AI Search (vector) + Cosmos DB**: Canonical RAG stack on Azure.
+- **Renamed services to remember**: Azure AD → **Entra ID**; Cognitive Services → **Azure AI Services**; Cognitive Search → **Azure AI Search**; Cosmos DB SQL API → **Cosmos DB for NoSQL**; Hyperscale (Citus) → **Cosmos DB for PostgreSQL**.
 
 ## Common Architecture Pattern on Azure
 ```
-Azure Front Door (CDN + WAF + Global LB) → Application Gateway → AKS (app)
-    → Azure SQL / Cosmos DB (data) + Azure Cache for Redis (cache)
+Azure Front Door (CDN + WAF + Global LB) → Application Gateway → AKS / Container Apps (app)
+    → Azure SQL / Cosmos DB (data) + Azure Managed Redis (cache)
     → Service Bus → Azure Functions (async processing)
-    → Blob Storage (files)
-    → Event Hubs → Synapse Analytics (analytics)
+    → Blob Storage / ADLS Gen2 (files)
+    → Event Hubs → Microsoft Fabric / Synapse (analytics)
+    → Azure OpenAI + AI Search (vector) → RAG app
 ```

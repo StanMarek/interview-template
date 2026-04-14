@@ -64,6 +64,10 @@ When consumers can't keep up with producers, the queue grows. Strategies:
 Since at-least-once delivery means duplicates, consumers must be idempotent:
 - Use a **deduplication table**: Store processed message IDs, skip duplicates
 - Design operations to be naturally idempotent: `SET balance = 100` is idempotent; `ADD 10 to balance` is not
+- **Kafka transactions + exactly-once semantics (EOS)**: Kafka supports effectively-exactly-once for `consume → process → produce` pipelines via transactional producers and `read_committed` consumers. It does NOT extend to arbitrary external side effects (e.g., HTTP calls, non-Kafka DB writes) — for those, combine idempotency keys with the Outbox pattern.
+
+## Reliable Publishing: The Outbox Pattern
+A common bug: service commits to its DB, then tries to publish to Kafka/RabbitMQ — but the broker is unreachable and the event is lost (dual-write problem). Solution: write the event to an `outbox` table in the same DB transaction. A relay process (poller or Debezium CDC on the WAL) publishes outbox rows to the broker. See [outbox-pattern.md](outbox-pattern.md).
 
 ## Poison Messages
 A message that causes the consumer to crash every time it tries to process it. Without handling, the message is retried infinitely. Solution: DLQ after N retries + monitoring/alerting on DLQ depth.

@@ -62,6 +62,24 @@ tm.lastKey();        // largest
 tm.floorKey(5);      // greatest key ≤ 5
 tm.ceilingKey(5);    // smallest key ≥ 5
 tm.subMap(1, 10);    // keys in [1, 10)
+
+// Immutable factories (Java 9+) — throw on null, reject duplicate keys
+Map<String, Integer> m = Map.of("a", 1, "b", 2);         // up to 10 pairs
+Map<String, Integer> big = Map.ofEntries(
+    Map.entry("a", 1), Map.entry("b", 2));               // no limit
+Set<Integer> s = Set.of(1, 2, 3);
+Map<String, Integer> copy = Map.copyOf(m);               // defensive immutable copy
+
+// SequencedMap / SequencedSet (Java 21, JEP 431)
+// LinkedHashMap implements SequencedMap; LinkedHashSet implements SequencedSet
+SequencedMap<String, Integer> sm = new LinkedHashMap<>();
+sm.putFirst("a", 1);                     // insert at head
+sm.putLast("z", 26);                     // insert at tail
+sm.firstEntry(); sm.lastEntry();         // peek
+sm.pollFirstEntry(); sm.pollLastEntry(); // remove
+sm.reversed();                           // reverse-ordered view (no copy)
+SequencedSet<Integer> ss = new LinkedHashSet<>();
+ss.addFirst(0);                          // if already present, moves to head
 ```
 
 ### Time Complexity
@@ -207,7 +225,63 @@ public int longestConsecutive(int[] nums) {
 // hash = s[0]*p^(k-1) + s[1]*p^(k-2) + ... + s[k-1]
 // Slide: remove s[i]*p^(k-1), multiply by p, add s[i+k]
 long BASE = 31, MOD = 1_000_000_007;
+
+public int strStr(String hay, String needle) {
+    int n = hay.length(), k = needle.length();
+    if (k == 0) return 0;
+    if (k > n) return -1;
+    long pow = 1;                                // BASE^(k-1) mod MOD
+    for (int i = 0; i < k - 1; i++) pow = pow * BASE % MOD;
+    long hNeedle = 0, hWin = 0;
+    for (int i = 0; i < k; i++) {
+        hNeedle = (hNeedle * BASE + needle.charAt(i)) % MOD;
+        hWin    = (hWin    * BASE + hay.charAt(i))    % MOD;
+    }
+    for (int i = 0; i <= n - k; i++) {
+        if (hWin == hNeedle && hay.regionMatches(i, needle, 0, k)) return i;
+        if (i < n - k) {
+            hWin = (hWin - hay.charAt(i) * pow % MOD + MOD * MOD) % MOD;
+            hWin = (hWin * BASE + hay.charAt(i + k)) % MOD;
+        }
+    }
+    return -1;
+}
+// Collision-resistant: use double hashing (two distinct BASE/MOD pairs).
 ```
+
+### 7. LRU Cache via LinkedHashMap (access-order)
+
+```java
+// Third arg accessOrder=true reorders on get(); removeEldestEntry evicts.
+class LRU<K, V> extends LinkedHashMap<K, V> {
+    private final int cap;
+    LRU(int cap) { super(cap, 0.75f, true); this.cap = cap; }
+    @Override protected boolean removeEldestEntry(Map.Entry<K, V> e) {
+        return size() > cap;
+    }
+}
+```
+
+### 8. Guava Multimap / Multiset / BiMap (when available)
+
+```java
+// Multimap — Map<K, List<V>> without the boilerplate
+ListMultimap<String, Integer> mm = ArrayListMultimap.create();
+mm.put("a", 1); mm.put("a", 2);          // no computeIfAbsent needed
+mm.get("a");                             // [1, 2]; empty list if absent
+
+// Multiset — frequency counter with O(1) count()
+Multiset<String> ms = HashMultiset.create();
+ms.add("x"); ms.add("x"); ms.count("x"); // 2
+// Top K by frequency: Multisets.copyHighestCountFirst(ms)
+
+// BiMap — invertible; values must also be unique
+BiMap<String, Integer> bi = HashBiMap.create();
+bi.put("a", 1);
+bi.inverse().get(1);                     // "a"
+```
+
+Eclipse Collections `ObjectIntHashMap<K>` avoids `Integer` boxing for counters (hot loops).
 
 ## Common Interview Problems
 
@@ -237,3 +311,7 @@ long BASE = 31, MOD = 1_000_000_007;
 - **Map as adjacency list:** `Map<Integer, List<Integer>>` is the standard graph representation in interviews.
 - **HashSet from a list:** `new HashSet<>(Arrays.asList(arr))` or `Set.of(...)` for quick lookup tables.
 - **Order matters?** Use `LinkedHashMap` (insertion order) or `TreeMap` (sorted order) instead of `HashMap`.
+- **Java 21 sequenced API:** Prefer `getFirst()/getLast()/reversed()` over `iterator().next()` or manual reverse loops. Works on `List`, `Deque`, `LinkedHashSet`, `LinkedHashMap`, `SortedSet`, `SortedMap`.
+- **Hash flooding (Java 8+):** Buckets become red-black trees once chain length ≥ 8 and capacity ≥ 64 — worst case is O(log n), not O(n), provided keys are `Comparable`.
+- **Initial capacity:** `new HashMap<>(expectedSize)` only sizes the table; for guaranteed no-resize, pass `expectedSize / 0.75 + 1` (or use `HashMap.newHashMap(n)` in Java 19+).
+- **System design adjacent:** Bloom filter (probabilistic membership, no false negatives), Count-Min Sketch (approximate frequency), Consistent Hashing (sharding with minimal remap), HyperLogLog (cardinality). Mention by name when discussing scale.

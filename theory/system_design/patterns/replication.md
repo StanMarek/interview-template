@@ -87,6 +87,8 @@ When the leader fails, a replica must be promoted. This is one of the hardest op
 | Cassandra | Leaderless, tunable consistency | Uses gossip protocol, hinted handoff |
 | DynamoDB | Leaderless (internally), multi-region with Global Tables | Managed by AWS |
 | CockroachDB | Multi-active, Raft consensus per range | Strong consistency, automatic rebalancing |
+| Spanner / YugabyteDB / TiDB | Multi-Raft / Paxos per shard | Globally-distributed strong consistency via TrueTime or HLC |
+| Aurora | Storage-level replication (6-way) | Leader + 5 replicas share distributed storage; instant failover |
 
 ## Possible Interview Questions
 1. "How would you ensure zero data loss during a leader failure?"

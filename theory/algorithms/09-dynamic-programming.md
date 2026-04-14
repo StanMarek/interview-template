@@ -15,21 +15,18 @@ Recognize these signals:
 
 ## Two Approaches
 
-**Top-Down (Memoization):** Recursive + cache. Start from the main problem and recurse down.
+**Top-Down (Memoization):** Recursive + cache. Start from the main problem and recurse down. Prefer an `int[][]` sentinel (e.g. `-1`) over `HashMap<String,...>` — string keys are 10–50x slower.
 
 ```java
-Map<String, Integer> memo = new HashMap<>();
+int[][] memo; // initialize with Arrays.fill(row, -1)
 public int solve(int i, int j) {
-    String key = i + "," + j;
-    if (memo.containsKey(key)) return memo.get(key);
     if (/* base case */) return /* value */;
-    int result = /* recursive formula */;
-    memo.put(key, result);
-    return result;
+    if (memo[i][j] != -1) return memo[i][j];
+    return memo[i][j] = /* recursive formula */;
 }
 ```
 
-**Bottom-Up (Tabulation):** Iterative + array. More efficient (no recursion overhead).
+**Bottom-Up (Tabulation):** Iterative + array. No recursion overhead, no stack-overflow risk, easier to space-optimize.
 
 ```java
 int[] dp = new int[n + 1];
@@ -39,6 +36,8 @@ for (int i = 1; i <= n; i++) {
 }
 return dp[n];
 ```
+
+**Pick top-down when** the state space is sparse (only a fraction reachable), recurrence order is awkward, or you want to bail on unreachable states. **Pick bottom-up when** all states are visited, you need space optimization (rolling rows), or recursion depth would blow the stack.
 
 ## DP Problem-Solving Framework
 
@@ -119,6 +118,12 @@ public int coinChange(int[] coins, int amount) {
 }
 ```
 
+**Variants:**
+- **0/1:** each item at most once. Iterate `w` **backwards**.
+- **Unbounded:** each item unlimited times. Iterate `w` **forwards**.
+- **Bounded:** each item has count `c[i]`. Either expand into `c[i]` copies, or use binary decomposition (1, 2, 4, ..., remainder) to reduce to 0/1 in `O(log c)` items.
+- **Coin Change — count ways:** outer loop coins, inner loop amount — order matters (outer amount, inner coins gives permutations, not combinations).
+
 ### 4. Two-Sequence DP
 
 ```java
@@ -166,20 +171,26 @@ public int lengthOfLIS(int[] nums) {
     return max;
 }
 
-// O(n log n) with patience sorting
+// O(n log n) with patience sorting. `tails[k]` = smallest tail of an LIS of length k+1.
 public int lengthOfLIS_fast(int[] nums) {
-    List<Integer> tails = new ArrayList<>();
+    int[] tails = new int[nums.length];
+    int size = 0;
     for (int num : nums) {
-        int pos = Collections.binarySearch(tails, num);
+        int pos = Arrays.binarySearch(tails, 0, size, num);
         if (pos < 0) pos = -(pos + 1);
-        if (pos == tails.size()) tails.add(num);
-        else tails.set(pos, num);
+        tails[pos] = num;
+        if (pos == size) size++;
     }
-    return tails.size();
+    return size;
 }
+// Note: Java's binarySearch returns `-(insertion point) - 1` when absent.
+// For strictly increasing LIS, duplicates overwrite (same length). For non-decreasing,
+// replace binarySearch with a custom upper-bound that returns first index > num.
 ```
 
 ### 6. Interval / Palindrome DP
+
+Iterate by **interval length**, pick a split point inside `[i, j]`. Outer loop is length, then left endpoint.
 
 ```java
 // Longest Palindromic Substring
@@ -197,6 +208,23 @@ public String longestPalindrome(String s) {
         }
     }
     return s.substring(start, start + maxLen);
+}
+
+// Burst Balloons — max coins. dp[i][j] = best for open interval (i, j)
+public int maxCoins(int[] nums) {
+    int n = nums.length;
+    int[] a = new int[n + 2];
+    a[0] = a[n + 1] = 1;
+    System.arraycopy(nums, 0, a, 1, n);
+    int[][] dp = new int[n + 2][n + 2];
+    for (int len = 2; len <= n + 1; len++) {
+        for (int i = 0; i + len <= n + 1; i++) {
+            int j = i + len;
+            for (int k = i + 1; k < j; k++) // k = last balloon burst in (i, j)
+                dp[i][j] = Math.max(dp[i][j], dp[i][k] + dp[k][j] + a[i] * a[k] * a[j]);
+        }
+    }
+    return dp[0][n + 1];
 }
 ```
 
@@ -216,21 +244,119 @@ public int maxProfit(int[] prices) {
 }
 ```
 
+### 8. Bitmask DP (n ≤ 20)
+
+State is a bitmask of "used" items. Classic for Traveling Salesman, assignment problems, subset enumeration.
+
+```java
+// TSP — min cost to visit all cities, end anywhere. O(n^2 · 2^n)
+public int tsp(int[][] dist) {
+    int n = dist.length, FULL = (1 << n) - 1;
+    int[][] dp = new int[1 << n][n];
+    for (int[] row : dp) Arrays.fill(row, Integer.MAX_VALUE / 2);
+    dp[1][0] = 0; // start at city 0
+    for (int mask = 1; mask <= FULL; mask++) {
+        for (int u = 0; u < n; u++) {
+            if ((mask & (1 << u)) == 0) continue;
+            for (int v = 0; v < n; v++) {
+                if ((mask & (1 << v)) != 0) continue;
+                int next = mask | (1 << v);
+                dp[next][v] = Math.min(dp[next][v], dp[mask][u] + dist[u][v]);
+            }
+        }
+    }
+    int ans = Integer.MAX_VALUE;
+    for (int v = 0; v < n; v++) ans = Math.min(ans, dp[FULL][v]);
+    return ans;
+}
+```
+
+Bit tricks: `mask & (mask - 1)` clears lowest bit; `Integer.bitCount(mask)` counts set bits; iterate subsets of `mask` with `for (int s = mask; s > 0; s = (s - 1) & mask)`.
+
+### 9. Tree DP
+
+Post-order: compute each child, combine at parent. Often pair "include root" vs "exclude root" states.
+
+```java
+// House Robber III — rob houses on a tree, no parent+child together
+public int rob(TreeNode root) {
+    int[] r = dfs(root); // [withoutRoot, withRoot]
+    return Math.max(r[0], r[1]);
+}
+private int[] dfs(TreeNode n) {
+    if (n == null) return new int[2];
+    int[] l = dfs(n.left), r = dfs(n.right);
+    int without = Math.max(l[0], l[1]) + Math.max(r[0], r[1]);
+    int with = n.val + l[0] + r[0];
+    return new int[]{without, with};
+}
+```
+
+### 10. Game Theory DP (Minimax + Memo)
+
+Two players, both optimal. Current player maximizes; `dp[state]` = best score for the player to move.
+
+```java
+// Stone Game — pick from ends, return true if player 1 wins
+Integer[][] memo;
+public boolean stoneGame(int[] piles) {
+    memo = new Integer[piles.length][piles.length];
+    return score(piles, 0, piles.length - 1) > 0;
+}
+private int score(int[] p, int i, int j) { // net score for player to move
+    if (i > j) return 0;
+    if (memo[i][j] != null) return memo[i][j];
+    int take_l = p[i] - score(p, i + 1, j);
+    int take_r = p[j] - score(p, i, j - 1);
+    return memo[i][j] = Math.max(take_l, take_r);
+}
+```
+
+### 11. Digit DP
+
+Count numbers ≤ N with some digit property. State: `(position, tight, started, extra)`.
+
+```java
+// Count numbers in [0, n] whose digits sum to target
+int[] digits; int target; Integer[][][] memo;
+public int count(int n, int target) {
+    String s = Integer.toString(n);
+    digits = new int[s.length()];
+    for (int i = 0; i < s.length(); i++) digits[i] = s.charAt(i) - '0';
+    this.target = target;
+    memo = new Integer[s.length()][target + 1][2];
+    return dp(0, 0, 1);
+}
+private int dp(int pos, int sum, int tight) {
+    if (pos == digits.length) return sum == target ? 1 : 0;
+    if (memo[pos][sum][tight] != null) return memo[pos][sum][tight];
+    int lim = tight == 1 ? digits[pos] : 9, res = 0;
+    for (int d = 0; d <= lim && sum + d <= target; d++)
+        res += dp(pos + 1, sum + d, tight == 1 && d == lim ? 1 : 0);
+    return memo[pos][sum][tight] = res;
+}
+```
+
 ## Common Interview Problems
 
-**Easy:** Climbing Stairs, House Robber, Maximum Subarray, Min Cost Climbing Stairs, Pascal's Triangle.
+**Easy:** Climbing Stairs, House Robber, Min Cost Climbing Stairs, Pascal's Triangle. (Kadane's — see `01-arrays-and-strings.md`.)
 
-**Medium:** Coin Change, Longest Increasing Subsequence, Longest Common Subsequence, Word Break, Unique Paths, Decode Ways, Partition Equal Subset Sum, Target Sum, House Robber II, Jump Game, Edit Distance.
+**Medium:** Coin Change, LIS, LCS, Word Break, Unique Paths, Decode Ways, Partition Equal Subset Sum, Target Sum, House Robber II/III, Jump Game, Edit Distance, Stone Game.
 
-**Hard:** Regular Expression Matching, Wildcard Matching, Burst Balloons, Longest Valid Parentheses, Palindrome Partitioning II, Distinct Subsequences, Interleaving String.
+**Hard:** Regular Expression Matching, Wildcard Matching, Burst Balloons, Longest Valid Parentheses, Palindrome Partitioning II, Distinct Subsequences, Interleaving String, TSP (bitmask), Count Numbers With Unique Digits (digit DP).
 
 ## Tips and Pitfalls
 
 - **Start with brute-force recursion**, then add memoization, then convert to bottom-up if needed.
 - **State definition is everything.** If your DP doesn't work, you probably defined the state wrong.
-- **Space optimization:** If `dp[i]` only depends on `dp[i-1]` and `dp[i-2]`, you only need two variables.
-- **0/1 knapsack iterates capacity backwards** (to avoid using an item twice). Unbounded knapsack iterates forwards.
-- **Watch for off-by-one errors** in base cases and loop bounds.
-- **When in doubt, draw the table.** Fill in a small example by hand before coding.
-- **DP on strings:** Almost always uses `dp[i][j]` where `i` and `j` index into the two strings.
-- **Bitmask DP** for problems with small sets (n ≤ 20): `dp[mask]` where mask is a bitmask of selected items.
+- **Space optimization:** If `dp[i]` only depends on `dp[i-1]` and `dp[i-2]`, use two variables. For 2D `dp[i][j]` depending only on row `i-1`, roll into two 1D arrays (or one, iterating the inner index carefully).
+- **0/1 knapsack iterates capacity backwards**; unbounded iterates forwards.
+- **Watch off-by-one** in base cases and loop bounds. When in doubt, draw the table on a small example.
+- **DP on strings:** almost always `dp[i][j]` indexing both strings; add a length-0 sentinel row/col.
+- **Bitmask DP** for n ≤ 20: state is `dp[mask]` or `dp[mask][i]`. Complexity `O(2^n · n)` or `O(2^n · n^2)`.
+- **Tree DP:** post-order recursion; return a small tuple from each child (e.g. `{with, without}`).
+- **Game theory DP:** define `dp[state]` from the current player's perspective; flip sign on recursion.
+- **Digit DP:** carry `tight` (still bounded by N) and `started` (handles leading zeros) flags.
+- **Probability/expectation DP:** use `double[]` and iterate from known states outward; watch for unreachable states (divide-by-zero).
+- **Prefer `int[][]` memo with a sentinel** over `HashMap<String,...>` — allocation and hashing kill performance.
+- **Recursion depth:** top-down can hit ~10^4–10^5 stack frames; default JVM stack is ~512 KB. Run with `-Xss8m` or convert to bottom-up for large inputs.

@@ -1,23 +1,30 @@
-# In-Memory Caches (Redis, Memcached)
+# In-Memory Caches (Redis, Valkey, Memcached)
 
 ## What They Are
 In-memory data stores that provide sub-millisecond latency for read/write operations. Used as caching layers, session stores, real-time leaderboards, message brokers, and more.
 
+## The 2024 Redis License Split (INTERVIEW-RELEVANT)
+In March 2024, Redis Inc. relicensed Redis from the permissive BSD license to dual SSPL / RSALv2 — non-OSI-approved source-available licenses that restrict commercial managed-service use. In response:
+- **Valkey** was forked from Redis 7.2.4 under the BSD license by the Linux Foundation. It is backed by AWS, Google, Oracle, Ericsson, and Snap, and is a drop-in Redis-compatible replacement.
+- AWS ElastiCache, Google Memorystore, and most cloud providers have switched their "Redis" offerings to Valkey.
+- **Redis 8 (2025)** relicensed again to AGPLv3 (OSI-approved) in an attempt to reunify, but the fork persists. Valkey 8.x ships with async I/O and roughly 2-3x throughput improvements over Redis 7.
+- In interview answers, "Redis" and "Valkey" are interchangeable API-wise — but mention the split if asked about licensing or multi-cloud deployments.
+
 ## Redis vs Memcached
 
-| Feature | Redis | Memcached |
+| Feature | Redis / Valkey | Memcached |
 |---------|-------|-----------|
-| Data structures | Strings, lists, sets, sorted sets, hashes, streams, bitmaps, HyperLogLog | Strings only |
+| Data structures | Strings, lists, sets, sorted sets, hashes, streams, bitmaps, HyperLogLog, geo, JSON (module) | Strings only |
 | Persistence | RDB snapshots + AOF (append-only file) | None (pure cache) |
 | Replication | Primary-replica | None (client-side sharding) |
 | Clustering | Redis Cluster (auto-sharding) | Client-side only |
 | Pub/Sub | Built-in | No |
-| Lua scripting | Yes (atomic operations) | No |
+| Lua scripting | Yes (atomic operations); Redis 7+ also has Functions | No |
 | Transactions | MULTI/EXEC (optimistic) | CAS (check-and-set) |
-| Threading | Single-threaded (event loop) + I/O threads in v6+ | Multi-threaded |
+| Threading | Single-threaded event loop + I/O threads (v6+); Valkey 8 adds async I/O | Multi-threaded |
 | Memory efficiency | Higher overhead per key | More efficient for simple strings |
 
-**Rule of thumb**: Use Redis unless you have a specific reason for Memcached (extreme simplicity, multi-threaded performance for string-only workloads).
+**Rule of thumb**: Use Redis/Valkey unless you have a specific reason for Memcached (extreme simplicity, multi-threaded performance for string-only workloads).
 
 ## Redis Data Structures and Use Cases
 
@@ -78,5 +85,6 @@ When Redis memory is full, it evicts keys based on the configured policy:
 4. "You have a hot key in Redis getting 500K QPS. How do you handle it?"
 5. "How do you ensure Redis data survives a restart?"
 6. "Design a rate limiter using Redis."
-7. "How would you implement distributed locking with Redis?"
+7. "How would you implement distributed locking with Redis?" (And why Redlock is controversial — see Martin Kleppmann's critique.)
 8. "What happens when Redis runs out of memory?"
+9. "What's the difference between Redis and Valkey, and why does it matter?"

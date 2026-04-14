@@ -96,6 +96,24 @@ class TrieNode {
 // Slightly slower due to HashMap overhead
 ```
 
+**Children storage trade-off:**
+- `TrieNode[26]`: O(1) lookup by `c - 'a'`, ~208B per node (64-bit refs) even if sparse — fast but memory-heavy
+- `HashMap<Character, TrieNode>`: only allocates used slots — better for sparse tries, Unicode, or large alphabets; ~2–3× slower constant factor
+
+### Apache Commons `PatriciaTrie`
+
+Available in this project via `commons-collections4`. Implements `SortedMap<String, V>` as a compressed (PATRICIA) trie — useful when you need prefix queries without rolling your own.
+
+```java
+import org.apache.commons.collections4.trie.PatriciaTrie;
+
+Trie<String, Integer> trie = new PatriciaTrie<>();
+trie.put("car", 1); trie.put("cart", 2); trie.put("caravan", 6);
+SortedMap<String, Integer> matches = trie.prefixMap("car"); // {car=1, caravan=6, cart=2}
+```
+
+All ops are O(K) where K = key length in bits. Use it for autocomplete-style problems when the interviewer allows libraries; rolling your own `TrieNode` is still the default for whiteboard-style problems.
+
 ## Essential Patterns
 
 ### 1. Word Search II (Trie + Backtracking on Grid)
@@ -153,6 +171,11 @@ class TrieNode {
     String word; // store the word at terminal nodes
 }
 ```
+
+**Key optimizations for Word Search II:**
+- **Word at leaf** instead of `isWord` + reconstruction — skip `StringBuilder`.
+- **Null-out after finding** (`node.word = null`) dedupes and prunes branches.
+- **Prune dead leaves**: after recursion, if the current trie node has no children, remove it from its parent. Massively cuts the search space when most words are found early. Pass the parent to DFS to enable this.
 
 ### 2. Autocomplete / Search Suggestions
 
@@ -257,6 +280,26 @@ class CountingTrie {
 }
 ```
 
+## Trie Variants (Know-the-Name)
+
+Usually enough to know *what they are* and *when to mention them* — implementation rarely asked.
+
+| Variant | Idea | When to mention |
+|---------|------|-----------------|
+| **Compressed / Radix / PATRICIA trie** | Collapse chains of single-child nodes into one edge labeled with a substring | Space-tight autocomplete, IP routing, `PatriciaTrie` |
+| **Ternary Search Tree (TST)** | Each node has lo/eq/hi children (BST-by-char) instead of a 26-wide array | Trie w/ unicode or sparse alphabets without HashMap overhead; ~constant-factor slower than array trie |
+| **Suffix trie / tree** | Trie of all suffixes of a string | Substring queries on one text; O(n) build (Ukkonen), ~10–20× memory of source |
+| **Suffix array** | Sorted array of suffix start indices + LCP | Same queries as suffix tree, ~3× less memory, harder to code but interview-friendlier |
+| **Aho-Corasick** | Trie + failure links (like KMP on a trie) | Multi-pattern search over a text; O(n + m + k) total (text + patterns + matches) |
+
+### Aho-Corasick (Conceptual)
+
+Build a trie of all patterns, then BFS to add a **failure link** from each node to the longest proper suffix that is also a prefix in the trie (analogous to KMP's failure function). Scan the text once, following `goto` edges and falling back via `fail` on mismatch; output any pattern ending at a reached node. Mention it for: virus signatures, multi-keyword filters, DNA motif scans.
+
+### Fuzzy Search (Trie + Edit Distance)
+
+DFS the trie while maintaining a **DP row** of edit distances (one entry per column of the query). Prune any subtree whose row minimum exceeds the allowed distance `k`. Runtime ~O(k · nodes_visited), far better than computing Levenshtein against every dictionary word. Lucene/Elasticsearch implement this via a **Levenshtein automaton** intersected with the term dictionary.
+
 ## Common Interview Problems
 
 ### Easy
@@ -278,7 +321,8 @@ class CountingTrie {
 
 - **Array vs. HashMap children:** Use `TrieNode[26]` for lowercase-only (faster). Use `HashMap` for larger character sets or sparse tries.
 - **Store the word at terminal nodes** instead of just a boolean — avoids reconstructing the word during DFS (see Word Search II).
-- **Pruning for optimization:** After finding a word, remove it from the trie to avoid duplicates and reduce future search space.
-- **Space optimization:** In practice, tries can use a lot of memory. Consider compressed tries (radix trees) if space is a concern, though this rarely comes up in interviews.
-- **Trie vs. HashSet for dictionary:** If you only need exact match, use HashSet. Tries shine when you need prefix operations.
+- **Pruning for optimization:** After finding a word, null its terminal and, on DFS unwind, detach childless nodes from their parent — shrinks the trie as you search.
+- **Space optimization:** Tries can use a lot of memory. Consider compressed tries (radix / PATRICIA) or TSTs if space is tight. Apache Commons `PatriciaTrie` is already on the classpath.
+- **Trie vs. HashSet for dictionary:** If you only need exact match, use HashSet. Tries shine when you need prefix, wildcard, or fuzzy operations.
 - **Deletion is rarely asked** but know conceptually: traverse to the node, unmark `isWord`, and optionally prune childless nodes.
+- **"Find all occurrences of any of K patterns in a text"** — mention Aho-Corasick before attempting to KMP each pattern separately.

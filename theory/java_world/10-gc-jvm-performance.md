@@ -1,5 +1,11 @@
 # GC, JVM & Performance — Senior Engineer Interview Preparation
 
+> **Java 25 LTS baseline (September 2025).** CMS was removed in JDK 14. The 2026 collector
+> landscape is effectively: Serial, Parallel, G1 (default), Generational ZGC (default ZGC mode
+> since JDK 21), Generational Shenandoah (production as of JDK 25, JEP 521), Epsilon (no-op).
+> This guide targets a senior engineer preparing interviews in 2026 — all examples assume
+> JDK 21/25 semantics unless explicitly noted.
+
 ---
 
 ## 1. GC Fundamentals Review
@@ -202,9 +208,10 @@ Without intervention, the white object would be incorrectly collected. SATB reco
 of any reference overwritten during marking via a **write barrier**, ensuring the original object
 graph is preserved.
 
-**The incremental update approach** (used by CMS):
+**The incremental update approach** (used historically by CMS, now mainly a contrast point):
 Instead of recording old values, record when a black object gains a reference to a white object.
-Mark the black object grey again so it gets rescanned.
+Mark the black object grey again so it gets rescanned. CMS was removed in JDK 14 (JEP 363); SATB
+is the approach used by G1, ZGC, and Shenandoah today.
 
 ### Write Barriers and Card Tables
 
@@ -346,6 +353,30 @@ Objects larger than half a region are **humongous**. They are:
 
 If you see frequent humongous allocations, consider increasing `-XX:G1HeapRegionSize`.
 
+### Region Pinning (JEP 423, JDK 22+)
+
+Before JDK 22, G1 had to **disable the entire GC** while any Java thread was inside a JNI
+critical region (`GetPrimitiveArrayCritical`). A long-running critical region could stall
+every allocator thread and produce fake OOMs ("GCLocker deadlock"). JEP 423 fixes this by
+**pinning only the regions that contain critical objects** — G1 maintains a per-region
+critical-object counter and skips pinned regions during evacuation while collecting everything
+else normally.
+
+This removes a long-standing latency cliff for code that calls into native libraries
+(JNI, SciMark-style numeric kernels, OpenCV, OpenSSL) and is transparent to application code.
+
+### String Deduplication
+
+`-XX:+UseStringDeduplication` (G1 only historically; extended to Parallel, ZGC, and Shenandoah
+in JDK 18+) finds Strings whose `char[]`/`byte[]` backing array has the same content and
+rewrites one instance to share the other's backing array. Studies at Oracle and Netflix showed
+~25% of live heap is Strings, ~half of which are duplicates — typical savings are 5-15% of
+live set.
+
+Eligibility: a String is considered after it survives `StringDeduplicationAgeThreshold=3`
+GC cycles (tunable). Deduplication runs on a background thread, so it adds minimal pause-time
+cost.
+
 ### Adaptive IHOP
 
 IHOP (Initiating Heap Occupancy Percent) determines when to start the concurrent marking cycle.
@@ -472,7 +503,7 @@ stacks and a small set of GC roots. This means:
 - Pause times are proportional to the number of GC roots (threads, JNI references),
   not the heap size or live set size
 
-### Generational ZGC (Java 21+)
+### Generational ZGC (JEP 439, default since JDK 23)
 
 Before JDK 21, ZGC was **non-generational** — it treated the entire heap uniformly. This was
 suboptimal because:
@@ -480,31 +511,60 @@ suboptimal because:
 - Allocation rate sensitivity: non-generational ZGC struggles if objects die quickly
   (frequent cycles needed)
 
-**Generational ZGC** (default in JDK 21 with `-XX:+UseZGC`):
+**Generational ZGC** (JEP 439, previewed in JDK 21, became the default in JDK 23+, and the
+non-generational mode is being removed in upcoming releases):
 - Separate young and old generations, each with their own collection cycle
 - Young gen collected more frequently (fast, most objects dead)
 - Old gen collected less often (more work, but fewer cycles)
-- Uses **store barriers** (in addition to load barriers) to track cross-generational references
-- Significantly reduces overhead for typical workloads (50-70% less CPU for GC)
+- Uses **store barriers** (in addition to load barriers) to track cross-generational references —
+  dirties a region-level remembered set rather than a card table
+- Significantly reduces overhead for typical workloads: 50-70% less CPU, ~25% lower heap
+  headroom required compared to non-generational ZGC
+- Each generation still uses colored pointers and forwarding tables, so both phases remain
+  fully concurrent with sub-millisecond STW pauses
 
-Enable: `-XX:+UseZGC` (generational is default in JDK 21+)
+```bash
+# JDK 21 — generational is opt-in
+-XX:+UseZGC -XX:+ZGenerational
 
-### When to Choose ZGC vs G1
+# JDK 23+ — generational is the default; flag is a no-op and is being removed
+-XX:+UseZGC
+```
 
-| Criterion | G1 | ZGC |
-|-----------|-----|-----|
-| Pause time requirement | <200ms acceptable | <1ms required |
-| Heap size | <32GB typical | Any (up to TBs) |
-| Throughput | Higher (simpler barriers) | ~3-5% lower (load barriers) |
-| Memory overhead | RSets (5-20%) | Colored pointers + forwarding (lower) |
-| Maturity / tooling | Very mature | Production-ready since JDK 15 |
-| Container support | Excellent | Excellent (since JDK 17+) |
+**Key generational-ZGC tuning flags (JDK 25):**
+| Flag | Purpose |
+|------|---------|
+| `-XX:SoftMaxHeapSize` | Soft upper bound the collector tries to stay under |
+| `-XX:ZUncommitDelay` | Seconds before unused memory is returned to the OS |
+| `-XX:ZCollectionIntervalMinor` | Force minor cycle cadence (rarely needed) |
+| `-XX:ZAllocationSpikeTolerance` | Multiplier for heuristic allocation-rate response |
 
-**Choose G1** when: throughput matters more than latency, heap < 32GB, you need maximum
-ecosystem compatibility.
+### When to Choose G1 vs ZGC vs Shenandoah (2026)
 
-**Choose ZGC** when: you have strict latency SLAs (<10ms p99), large heaps, or the application
-is latency-sensitive (trading, real-time systems).
+A three-way decision — not two — now that Generational Shenandoah is a product feature.
+
+| Criterion | G1 | Generational ZGC | Generational Shenandoah |
+|-----------|-----|------------------|-------------------------|
+| Typical average pause | 10-50ms | <1ms | 1-10ms |
+| Typical p99 pause | 100-200ms | ~1ms | ~10-20ms |
+| Sweet-spot heap size | 1-32GB | 32GB – multi-TB | 2-128GB |
+| Throughput | Highest (simpler barriers) | ~3-5% lower | ~2-4% lower |
+| Memory headroom required | ~10% reserve | ~25% (plus multi-mapping) | ~10-15% |
+| Compressed oops support | Yes | No (uses full 64-bit colored pointers) | Yes |
+| Ships in Oracle JDK | Yes | Yes | No (Red Hat/Temurin) |
+| JDK status | Default since 9 | Default ZGC mode since 23 | Generational production in 25 |
+
+**Choose G1** when: throughput matters more than latency, heap < 32GB, 100-200ms pauses are
+acceptable (typical web services), or you need maximum ecosystem compatibility.
+
+**Choose Generational ZGC** when: you need <1ms p99 pauses, heap ≥ 32GB, you can afford
+~25% heap headroom, and you do not need compressed oops (object density matters less to you
+than consistent latency).
+
+**Choose Generational Shenandoah** when: you want ZGC-class latency on mid-size heaps
+(2-128GB) with compressed oops, you face bursty allocation spikes, or you ship on a
+Temurin/Red Hat distribution. Good fit for containerized services with heap budgets
+under 64GB.
 
 ---
 
@@ -543,16 +603,31 @@ Shenandoah can evacuate (move) objects concurrently using a CAS on the Brooks po
 2. CAS the old Brooks pointer from self to new location
 3. If CAS fails, another thread (GC or mutator) already relocated it — one copy wins
 
+### Generational Shenandoah (JEP 404 → JEP 521)
+
+Shenandoah followed ZGC into a generational model. The timeline:
+- **JEP 404** (JDK 24) shipped Generational Shenandoah as experimental
+- **JEP 521** (JDK 25) promoted it to a production feature
+
+Enable: `-XX:+UseShenandoahGC -XX:ShenandoahGCMode=generational`
+(single-generation mode is still the default; you opt into generational explicitly.)
+
+Why it matters in interviews: Shenandoah's generational mode targets the same workload class
+as generational ZGC but keeps Shenandoah's advantages — compressed oops support, smaller
+memory headroom, and workable performance on mid-size heaps where ZGC's fixed metadata
+budget feels heavy.
+
 ### Comparison with ZGC
 
-| Aspect | ZGC | Shenandoah |
-|--------|-----|------------|
-| Reference interception | Load barrier (pointer coloring) | Brooks pointer + load/store barriers |
-| Memory overhead | Multi-mapped virtual memory | Extra word per object (~4-8 bytes) |
-| Heap size support | Multi-terabyte | Practical up to ~hundreds of GB |
-| JDK distribution | All OpenJDK builds | Not in Oracle JDK (Red Hat, Adoptium) |
-| Generational | Yes (JDK 21+) | Non-generational (generational in progress) |
-| Pause times | ~0.05-0.5ms | ~0.5-10ms (slightly higher) |
+| Aspect | Generational ZGC | Generational Shenandoah |
+|--------|------------------|-------------------------|
+| Reference interception | Load barrier + colored pointers | Brooks pointer + load/store barriers |
+| Memory overhead | Multi-mapped virtual memory, ~25% heap headroom | Extra word per object (~4-8 bytes); compressed oops supported |
+| Heap size support | Multi-terabyte (tested up to 16TB) | Practical up to ~hundreds of GB |
+| JDK distribution | All OpenJDK builds (including Oracle JDK) | Not in Oracle JDK; ships in Red Hat/Adoptium/Temurin |
+| Generational | Default since JDK 23 | Production since JDK 25 (opt-in) |
+| Typical p99 pause | ~0.1-1ms | ~1-10ms |
+| Allocation spike resilience | Good; relies on concurrent relocation | Excellent; concurrent evacuation handles bursts well |
 
 ---
 
@@ -574,17 +649,23 @@ Shenandoah can evacuate (move) objects concurrently using a CAS on the Brooks po
 
 ### GC Logging
 
-Modern GC logging uses the unified logging framework (JDK 9+):
+Modern GC logging uses the **unified logging framework** (JDK 9+). The old
+`-XX:+PrintGCDetails -Xloggc:...` flags were removed in JDK 9 — any legacy script still using
+them will fail on modern JVMs.
 
 ```bash
-# Basic GC logging
+# Basic GC logging (recommended production default)
 -Xlog:gc:file=gc.log:time,uptime,level,tags:filecount=5,filesize=50m
 
-# Detailed GC logging
+# Detailed GC logging — all GC subsystems
 -Xlog:gc*:file=gc.log:time,uptime,level,tags:filecount=10,filesize=100m
 
-# Pre-JDK 9 (deprecated but still seen in production)
--XX:+PrintGCDetails -XX:+PrintGCDateStamps -Xloggc:gc.log
+# Include safepoint + classloading + heap info
+-Xlog:gc*,safepoint,classload:file=gc.log::filecount=10,filesize=100m
+
+# Heap-dump-on-OOM (production safety net)
+-XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/var/log/heapdumps/
+-XX:+ExitOnOutOfMemoryError   # optional: terminate JVM instead of limping
 ```
 
 **Reading G1 GC logs:**
@@ -595,11 +676,32 @@ Modern GC logging uses the unified logging framework (JDK 9+):
    GC cycle #             before after heap   pause time
 ```
 
-Key things to look for:
+**Reading generational ZGC logs:**
+```
+[3.142s][info][gc] GC(7) Minor Collection (Allocation Rate) 128M(12%)->64M(6%) 0.421ms
+[3.200s][info][gc] GC(8) Major Collection (Proactive) 1G(50%)->512M(25%) 0.812ms
+```
+
+Note: ZGC reports **Minor** (young) and **Major** (old) cycles separately under the
+generational model. Pauses are reported in milliseconds with sub-ms precision; if you see
+multi-millisecond pauses in ZGC logs, investigate time-to-safepoint (TTSP), not GC itself.
+
+Key things to look for (any collector):
 - **Pause times trending up**: Heap pressure, too many mixed GCs
-- **Full GCs**: Indicates G1 falling behind — increase heap or tune IHOP
+- **Full GCs**: Indicates G1/ZGC falling behind — increase heap or tune IHOP / SoftMaxHeapSize
 - **To-space exhausted**: Evacuation failure — increase `-XX:G1ReservePercent`
 - **Humongous allocation**: Objects > region_size/2 — increase region size
+- **Allocation stalls (ZGC)**: Mutator blocked waiting for free pages — raise `-Xmx` or
+  `-XX:ConcGCThreads`
+
+### Analyzing GC Logs at Scale
+
+- **GCeasy** (gceasy.io) — free online analyser for any OpenJDK GC log, produces latency
+  percentiles, throughput %, and anomaly report.
+- **GCViewer** — offline desktop tool for pause-time graphs.
+- **JFR** can emit `jdk.GarbageCollection`, `jdk.GCPhasePause`, `jdk.PromotionFailed` and
+  many more events that correlate GC with allocation sources and thread behavior — prefer
+  JFR over raw GC logs in production observability pipelines.
 
 ### Common Tuning Scenarios
 
@@ -626,31 +728,45 @@ Key things to look for:
 - Increase `-XX:G1ReservePercent` to keep evacuation headroom
 - Check for premature promotion (tenuring threshold too low)
 
-### Collector Decision Tree
+### Collector Decision Tree (JDK 25)
 
 ```
 What is your primary concern?
 │
-├── Throughput (batch processing, analytics)
+├── Throughput (batch processing, analytics, Spark executors)
 │   └── Use Parallel GC (-XX:+UseParallelGC)
 │       └── Tune: -XX:GCTimeRatio, -XX:MaxGCPauseMillis
 │
-├── Latency (web services, APIs)
-│   ├── Heap < 32GB, pauses < 200ms acceptable
-│   │   └── Use G1 GC (default)
-│   │       └── Tune: -XX:MaxGCPauseMillis=50
-│   │
-│   └── Any heap size, pauses < 1ms required
-│       └── Use ZGC (-XX:+UseZGC)
-│           └── Minimal tuning needed (self-adaptive)
+├── Balanced latency + throughput (typical REST services, 1-32GB heap)
+│   └── Use G1 GC (default, no flag needed)
+│       └── Tune: -XX:MaxGCPauseMillis=50-200 (soft target)
+│       └── Consider: -XX:+UseStringDeduplication if heap has many duplicate Strings
 │
-├── Memory-constrained (containers, small heaps < 256MB)
+├── Strict latency SLA (<1ms p99), any heap size, headroom available
+│   └── Use Generational ZGC (-XX:+UseZGC)  // generational is default in JDK 23+
+│       └── Minimal tuning needed (self-adaptive)
+│       └── Plan for ~25% heap headroom above live set
+│
+├── Low latency on mid-size heap (2-128GB) with compressed oops, Temurin/Red Hat
+│   └── Use Generational Shenandoah
+│       (-XX:+UseShenandoahGC -XX:ShenandoahGCMode=generational)
+│
+├── Memory-constrained (containers, small heaps < 256MB, CLI tools)
 │   └── Use Serial GC (-XX:+UseSerialGC)
-│       └── Or consider -XX:+UseEpsilonGC for short-lived processes
 │
-└── Ultra-low latency + Red Hat ecosystem
-    └── Use Shenandoah (-XX:+UseShenandoahGC)
+└── Short-lived process, zero-GC overhead acceptable (benchmarks, CI runs)
+    └── Use Epsilon (-XX:+UnlockExperimentalVMOptions -XX:+UseEpsilonGC)
+        // JVM halts on OOM — never reclaims memory
 ```
+
+### Historical Note: CMS is Gone
+
+The **Concurrent Mark Sweep (CMS)** collector was deprecated in JDK 9 (JEP 291) and **removed
+entirely in JDK 14** (JEP 363). Any advice mentioning CMS tuning (e.g.,
+`-XX:+UseConcMarkSweepGC`, `CMSInitiatingOccupancyFraction`) is obsolete; on modern JDKs those
+flags cause the JVM to fail at startup. G1 is the drop-in replacement for CMS's original
+"mostly-concurrent, moderate-latency" niche; ZGC/Shenandoah fill the "sub-ms pause" niche CMS
+never reached.
 
 ---
 
@@ -705,6 +821,13 @@ public void handleRequest(Request req) {
     }
 }
 ```
+
+**Virtual threads change the calculus**: Virtual threads (JEP 444, JDK 21) are created per
+task and discarded — they don't pool, so a "missing `remove()`" bug no longer leaks forever.
+But `ThreadLocal` allocates a fresh copy per virtual thread, and millions of virtual threads
+can amplify per-thread state into substantial heap pressure. Prefer **`ScopedValue`**
+(JEP 487, preview in JDK 25) for request-scoped context under virtual threads — it's
+immutable, inherited by child structured-concurrency tasks, and doesn't require cleanup.
 
 **4. Classloader leaks (common in application servers):**
 When a web application is redeployed, a new classloader is created. If any object from the old
@@ -788,6 +911,8 @@ jstat -gcutil <pid> 1000
 
 JFR is a low-overhead (~1-2%) profiling framework built into the JVM. It records "events"
 (GC pauses, thread parks, allocations, method samples, I/O, etc.) to a binary format.
+JFR went fully open-source in JDK 11 (JEP 328) and is available in every OpenJDK build — the
+old "Oracle JDK only" limitation is long gone.
 
 **Starting JFR:**
 ```bash
@@ -839,6 +964,57 @@ public Order processOrder(OrderRequest request) {
 }
 ```
 
+**JFR Event Streaming (JEP 349, JDK 14+):**
+
+Traditionally JFR wrote to a file and you analysed it after the fact. JEP 349 exposes events
+**as they happen** via `jdk.jfr.consumer.RecordingStream`, which is the foundation of modern
+cloud observability pipelines (Datadog, New Relic, Grafana Pyroscope, OpenTelemetry JFR
+exporter all consume it):
+
+```java
+try (RecordingStream rs = new RecordingStream()) {
+    rs.enable("jdk.CPULoad").withPeriod(Duration.ofSeconds(1));
+    rs.enable("jdk.GarbageCollection");
+    rs.enable("jdk.GCPhasePause");
+
+    rs.onEvent("jdk.GCPhasePause", event -> {
+        long ms = event.getDuration().toMillis();
+        if (ms > 100) {
+            log.warn("Long GC pause: {}ms at {}", ms, event.getStartTime());
+        }
+    });
+    rs.onEvent("jdk.CPULoad", event ->
+        metrics.gauge("jvm.cpu.load", event.getFloat("machineTotal")));
+
+    rs.startAsync();
+}
+```
+
+**Remote streaming** via `jdk.management.jfr.RemoteRecordingStream` (JDK 16+) connects
+over JMX to another JVM — useful for sidecar agents in Kubernetes. Production deployment
+patterns:
+
+- **Always-on continuous recording**: `-XX:StartFlightRecording=disk=true,maxsize=4g,
+  maxage=24h,settings=profile` — 24h ring buffer, dumped on SIGTERM via a pre-stop hook.
+- **On-demand capture**: `jcmd <pid> JFR.dump` triggered by alerting (e.g., when p99 latency
+  spikes, dump the last 10 minutes).
+- **Stream to backend**: a tiny Java agent consumes `RecordingStream` events, serialises them
+  to protobuf, ships to OTLP collector / Datadog / Pyroscope.
+
+### What's New in JFR (JDK 25)
+
+Three JEPs landed together in JDK 25 and are common interview territory:
+
+| JEP | Feature | Why it matters |
+|-----|---------|----------------|
+| **JEP 509** | JFR CPU-Time Profiling (Experimental, Linux) | Uses `SIGPROF` via `CPU-time` perf events, measures actual CPU time (not wall-clock), sees native frames |
+| **JEP 518** | JFR Cooperative Sampling | Reworks the sampler so stack walks happen from a safepoint **but without safepoint bias**; concurrent with ZGC, much more scalable |
+| **JEP 520** | JFR Method Timing & Tracing | Bytecode-instrumentation-based exact timing for specific methods (no sampling — every call counted) |
+
+The net effect: JFR in 2026 is no longer a "black box" that sample-biases toward idle methods.
+It competes directly with async-profiler for accuracy while retaining its
+structured-event/low-overhead advantages.
+
 ### JMC (Java Mission Control)
 
 GUI tool for analyzing JFR recordings. Key views:
@@ -851,52 +1027,108 @@ GUI tool for analyzing JFR recordings. Key views:
 
 ### async-profiler
 
-Open-source profiler that uses `perf_events` (Linux) or `DTrace` (macOS) for accurate
-sampling. Avoids safepoint bias.
+Open-source profiler (github.com/async-profiler/async-profiler) that uses `perf_events`
+(Linux) or `DTrace` (macOS) for accurate sampling. Avoids safepoint bias because it relies
+on `AsyncGetCallTrace`, a HotSpot internal API that walks the stack of **any** running thread,
+not just threads at a safepoint.
 
 ```bash
 # CPU profiling — generate flame graph
 ./profiler.sh -d 30 -f flamegraph.html <pid>
 
-# Allocation profiling — find allocation hotspots
+# Allocation profiling — find allocation hotspots (TLAB-based sampling)
 ./profiler.sh -d 30 -e alloc -f alloc-flame.html <pid>
 
-# Lock profiling
+# Lock profiling — contention hotspots
 ./profiler.sh -d 30 -e lock -f lock-flame.html <pid>
 
-# Wall-clock profiling (includes time waiting for I/O, locks, etc.)
+# Wall-clock profiling — includes time in I/O, locks, parked threads
 ./profiler.sh -d 30 -e wall -f wall-flame.html <pid>
+
+# Differential flame graph — compare before/after
+./profiler.sh -d 30 -f before.html <pid>
+# ... apply fix ...
+./profiler.sh -d 30 -f after.html <pid>
+# render diff in JFR viewer or flamegraph.pl --diff
 ```
+
+**When to pick async-profiler over JFR:**
+- You need CPU profiles with minimal overhead and the richest flame-graph ecosystem.
+- You're profiling methods in native libraries (JNI, Netty's native epoll, OpenSSL).
+- You care about `cycles:p` / `instructions:p` hardware events rather than method samples.
+
+**When to pick JFR:** structured event correlation (GC + allocation + lock + method samples
+in one timeline), long-running continuous recording, and integration with JMC's automated
+analysis. In JDK 25, the JEP 518 + 509 improvements narrow the gap significantly.
 
 ### Command-Line Diagnostics
 
 ```bash
-# jcmd — Swiss Army knife for JVM diagnostics
-jcmd <pid> VM.flags              # All active JVM flags
-jcmd <pid> GC.heap_info          # Current heap layout
-jcmd <pid> Thread.print          # Thread dump
-jcmd <pid> VM.native_memory      # Native memory tracking (requires -XX:NativeMemoryTracking=summary)
+# jcmd — Swiss Army knife; ships in every JDK; requires no attach agent beyond jcmd itself
+jcmd <pid> help                        # List all available commands for this JVM
+jcmd <pid> VM.version                  # Version, vendor, build info
+jcmd <pid> VM.flags                    # All active JVM flags (including auto-tuned)
+jcmd <pid> VM.system_properties        # All system properties
+jcmd <pid> VM.classloaders             # Classloader hierarchy (useful for leak hunting)
+jcmd <pid> GC.heap_info                # Current heap layout
+jcmd <pid> GC.heap_dump /tmp/heap.hprof  # Full HPROF heap dump (preferred over jmap)
+jcmd <pid> GC.class_histogram          # Class histogram (live)
+jcmd <pid> GC.run                      # Request a full GC (use sparingly)
+jcmd <pid> Thread.print                # Thread dump
+jcmd <pid> Thread.dump_to_file /tmp/thr.json  # JSON thread dump (JDK 21+, JEP 425 virtual threads)
+jcmd <pid> VM.native_memory summary    # Native memory tracking (NMT), requires -XX:NativeMemoryTracking=summary
+jcmd <pid> VM.native_memory baseline   # Snapshot for diffing
+jcmd <pid> VM.native_memory detail.diff  # Diff vs baseline — find native leaks
+
+# JFR via jcmd (see §8 JFR section)
+jcmd <pid> JFR.start duration=60s filename=rec.jfr
+jcmd <pid> JFR.dump filename=snap.jfr
+jcmd <pid> JFR.stop
 
 # jstat — GC statistics
 jstat -gcutil <pid> 1000         # GC stats every second
 jstat -gccause <pid> 1000        # GC stats + cause of last GC
 
-# jstack — Thread dump (deadlock detection)
-jstack <pid>                     # Thread dump
-jstack -l <pid>                  # Include lock info
+# jstack — thread dump (deadlock detection)
+jstack <pid>                     # Basic thread dump
+jstack -l <pid>                  # Include lock info (owned + waiting)
 
-# jmap — Heap analysis
-jmap -histo <pid>                # Object histogram (class, count, size)
-jmap -histo:live <pid>           # Same but triggers GC first (only live objects)
+# jmap — legacy; prefer `jcmd GC.heap_dump` which does not require -F on a hung JVM
+jmap -histo <pid>                # Object histogram
+jmap -histo:live <pid>           # Live-only (triggers GC first)
 ```
 
-### VisualVM
+### Heap Dumps — Producing, Sizing, Analysing
 
-Real-time monitoring tool (standalone or plugin-based):
-- Monitor CPU, memory, threads, classes in real time
-- Heap dump analysis
-- CPU and memory profiling (sampling and instrumentation)
-- Plugin ecosystem (MBeans, BTrace, etc.)
+```bash
+# Automatic on OOM (always enable in production)
+-XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/var/log/heapdumps/
+
+# On-demand via jcmd (preferred; works on running JVM without -F)
+jcmd <pid> GC.heap_dump /tmp/heap.hprof
+
+# Compressed (gzip) — saves disk space on large heaps (JDK 17+)
+jcmd <pid> GC.heap_dump -gz=9 /tmp/heap.hprof.gz
+
+# Via kill signal (Linux; requires -XX:+HeapDumpOnSignal + -XX:HeapDumpPath)
+kill -10 <pid>    # SIGUSR1 — takes heap dump, does not kill process
+```
+
+**Rules of thumb:**
+- A heap dump is approximately the size of live data in the heap (not the whole heap).
+- On a 16GB heap with 8GB live, expect ~8GB HPROF file → budget ~20GB disk for uncompressed +
+  gzipped copy.
+- Always dump with `GC.heap_dump` before restarting a suspected-leak JVM.
+
+### Analysis tooling
+
+- **Eclipse MAT** — de facto standard. Load HPROF, run "Leak Suspects Report", inspect
+  Dominator Tree, query with OQL.
+- **JDK Mission Control (JMC)** — best for JFR + Oracle's newer heap analyser.
+- **Heaphero.io / GCeasy.io** — online analysers for heap dumps and GC logs; convenient but
+  think about sensitive data before uploading.
+- **VisualVM** — still maintained as a separate project (visualvm.github.io). Good for quick
+  interactive use on a dev box; in production prefer JFR + async-profiler.
 
 ---
 
@@ -1051,9 +1283,90 @@ Compile with assumption: "obj is always type Foo"
 
 Graal is a JIT compiler written in Java (as opposed to C2, which is written in C++):
 - Easier to maintain and extend
-- Better optimizations for some workloads (especially partial escape analysis)
+- Better optimizations for some workloads (especially **partial escape analysis** — elides
+  allocations on any control-flow path where the object doesn't escape, even if it escapes
+  on another path)
 - Foundation for GraalVM (polyglot runtime, native-image AOT compilation)
-- Available via: `-XX:+UnlockExperimentalVMOptions -XX:+UseJVMCICompiler` (JDK 17+)
+
+**History caveat (important in 2026):** the Galahad / "Graal JIT in-tree" experiment was
+removed from OpenJDK in JDK 21 (JEP 410). The in-JDK `-XX:+UseJVMCICompiler` flag still exists
+but is hollow on recent builds. If you want Graal as a JIT, run GraalVM itself (Oracle GraalVM
+or community "Mandrel" builds for Native Image) — otherwise you're on HotSpot C1/C2.
+
+### GraalVM Native Image
+
+GraalVM **Native Image** performs a **closed-world AOT compilation**: it analyses the whole
+program, removes unused code, and produces a standalone native executable. No JVM at runtime.
+
+| Aspect | HotSpot + JIT | GraalVM Native Image |
+|--------|---------------|----------------------|
+| Startup | ~1-10s (framework dependent) | ~10-100ms |
+| Peak throughput | 100% baseline | ~70-85% of HotSpot C2 |
+| Memory (RSS) | 1-2 GB typical | 100-400 MB typical |
+| Warm-up required | Yes (minutes to peak) | No |
+| Runtime reflection | Free | Requires config (`reachability-metadata.json`) |
+| Dynamic classloading | Free | Not supported |
+| Sweet spot | Long-running services | Serverless, CLIs, short-lived jobs |
+
+Typical use cases in 2026: Spring Boot 3.x and Quarkus 3.x produce Native Image binaries with
+one command; AWS Lambda cold-start drops from ~4s to ~150ms; Kubernetes pods scale up faster
+under bursty load.
+
+### Project Leyden — AOT Class Loading, Linking, and Profiling
+
+Project Leyden is a multi-release effort in OpenJDK to bring AOT benefits to **stock HotSpot**
+without the closed-world restrictions of Native Image. Status in April 2026:
+
+| JEP | Release | Feature |
+|-----|---------|---------|
+| **JEP 483** | JDK 24 (2025-03) | Ahead-of-Time Class Loading & Linking — ~40% faster startup |
+| **JEP 514** | JDK 25 (2025-09) | AOT Command-Line Ergonomics — one-step cache creation |
+| **JEP 515** | JDK 25 (2025-09) | AOT Method Profiling — JIT starts compiling hot methods at boot |
+| **JEP 516** | JDK 26 (targeted 2026-09) | GC-agnostic AOT cache (unlocks ZGC) |
+
+**Workflow (JDK 25, simplified by JEP 514):**
+
+```bash
+# 1. Training run — record classes loaded + method profiles under representative load
+java -XX:AOTCacheOutput=app.aot -jar app.jar run-representative-load
+
+# 2. Production run — consumes cache, skips class loading/linking and primes the JIT
+java -XX:AOTCache=app.aot -jar app.jar
+```
+
+Reported benefits on Spring PetClinic with JDK 25: **~40-45% faster startup**, ~21k classes
+pre-linked at boot, and measurable warm-up reduction because hot methods already have
+profile data available to C2 on the first invocation. Unlike Native Image, the JVM keeps full
+dynamic capabilities (reflection, dynamic class loading, JVMTI).
+
+**Mental model:**
+- CDS (JDK 5+) — share read-only metadata for JDK classes
+- AppCDS (JDK 10+) — extend CDS to application classes
+- AOT Class Loading (JEP 483) — pre-link classes so they skip verification/loading
+- AOT Method Profiling (JEP 515) — pre-seed the JIT profile database
+
+### Compact Object Headers (JEP 450 → JEP 519)
+
+Traditionally every Java object on a 64-bit JVM with compressed oops carries a **12-byte
+header** (8-byte mark word + 4-byte Klass pointer). Compact Object Headers shrink this to
+**8 bytes** by packing the compressed Klass pointer directly into the mark word.
+
+| JEP | Release | Status |
+|-----|---------|--------|
+| **JEP 450** | JDK 24 | Experimental |
+| **JEP 519** | JDK 25 | Product feature (not default) |
+
+Enable: `-XX:+UseCompactObjectHeaders`
+
+Impact (from SPECjbb2015 and Amazon/Oracle production benchmarks):
+- ~10-20% lower live heap for object-heavy workloads
+- Up to 22% less heap on SPECjbb2015
+- ~8% lower CPU in the same workload (fewer cache misses, less GC)
+- Allocation-heavy apps see 5-30% CPU savings
+
+Interview-worthy detail: compressing the Klass pointer from 32 to 22 bits capped the number
+of loaded classes at ~4 million — a limit nobody hits in practice but one you might be asked
+to justify.
 
 ---
 
@@ -1151,7 +1464,7 @@ Problems with `finalize()`:
 - **Performance**: Finalizable objects require at least two GC cycles to reclaim
   (first GC enqueues to finalizer queue, second GC actually frees)
 - **Ordering**: No guaranteed order of finalization
-- **Deprecated** since JDK 9, removal in progress
+- **Deprecated for removal** since JDK 18 (JEP 421); from JDK 21 you can disable finalization entirely with `--finalization=disabled`
 
 ```java
 // GOOD: Use try-with-resources + Cleaner
@@ -1459,7 +1772,88 @@ detection. Use it only when you have clear evidence that GC pressure is the bott
 
 ---
 
-## 13. Common Senior Interview Questions
+## 13. Project Valhalla — Value Objects and Null-Restricted Types
+
+Project Valhalla is the long-running OpenJDK effort to add **value objects** to Java.
+Status in April 2026: value classes and null-restricted types are in **preview** via
+early-access builds; production landing is expected in a future LTS (JDK 27 is the most-likely
+target). Interview-relevance is high because it touches directly on memory layout, GC, and
+performance — all the material preceding sections cover.
+
+### The Problem Valhalla Solves
+
+Today every `Integer`, `LocalDate`, `Point`, `Pair<K,V>` is an **identity object**: it has
+a header, lives on the heap, is referenced by pointer, and can be `null`, `synchronized`-on,
+and compared with `==`. That's expensive for tiny objects:
+
+```
+Integer[1_000_000]            // array of Integer references
+Memory layout today:
+  [array header][ptr][ptr][ptr]...     // 4 MB of pointers
+  + 16 bytes per Integer (12 header + 4 int + padding) × 1M
+  = ~20 MB, with ~1M pointer hops, ~1M cache misses
+```
+
+An `int[1_000_000]` by contrast is a flat 4 MB block with zero indirection.
+
+### Value Classes
+
+A **value class** has no identity — two instances with the same field values are
+indistinguishable. The JVM is free to flatten them into containing structures, skip the
+header, and pass them in registers.
+
+```java
+// Preview syntax (Java 24/25 preview)
+public value class Point {
+    double x;
+    double y;
+}
+
+Point[] points = new Point[1_000_000];  // Flat array: 16 MB, no indirection
+```
+
+Key guarantees:
+- No identity — `==` is equivalent to field equality
+- No mutable state (all fields implicitly final)
+- No `synchronized` on instances
+- Can be flattened into arrays, fields of other classes, and local variables
+
+### Null-Restricted Types
+
+To make value-object flattening safe, Valhalla introduces **null-restricted** types
+(exclamation mark) and **nullable** types (question mark):
+
+```java
+Point!    p1 = new Point(1.0, 2.0);    // Non-null — JVM flattens
+Point?    p2 = null;                    // Nullable — reference layout
+```
+
+The `!` form lets the compiler and JVM omit null checks and flatten aggressively. The type
+system catches `null` escapes at compile time, eliminating a class of NPEs.
+
+### Performance Implications (When It Lands)
+
+- **Generic collections without boxing**: `List<Integer!>` can use a flat `int[]` under the
+  hood; no more `Integer` autobox pressure on GC.
+- **Removal of many primitive-specialized APIs**: Eclipse Collections `IntArrayList`,
+  fastutil `Int2IntOpenHashMap`, etc., become less necessary.
+- **Improved cache density**: Flat arrays of small value classes fit in far fewer cache lines.
+- **Reduced GC work**: Value objects do not live on the heap as separate allocations, so they
+  do not participate in marking/sweeping/relocation.
+
+### Interview-Ready Summary
+
+"Valhalla brings value objects — identity-less, flattenable, null-restricted — to Java.
+Value classes skip the object header, eliminate pointer indirection in arrays, and let the
+JIT pass them in registers. Null-restricted types (`Point!`) enforce non-null at compile time,
+making flattening safe. Expected production release in a future LTS (likely JDK 27).
+Combined with Compact Object Headers (JEP 519) and generational ZGC/Shenandoah, Valhalla is
+the biggest memory-layout change to the JVM since generics — it should eliminate most
+primitive-vs-object trade-offs in hot code."
+
+---
+
+## 14. Common Senior Interview Questions
 
 **Q1: Your production service is experiencing long GC pauses (>500ms). Walk through your
 troubleshooting process.**
@@ -1573,11 +1967,87 @@ pooling often makes performance worse, not better.
 
 A: Non-generational ZGC treats the entire heap uniformly — every GC cycle marks and potentially
 relocates across the full heap. This means short-lived objects (which are the majority) still
-contribute to marking work and relocation overhead. Generational ZGC, finalized in JDK 21, splits
-the heap into young and old generations. Young gen is collected frequently with minimal overhead
-(most objects are dead), while old gen is collected independently and less often. This required
-adding **store barriers** (in addition to load barriers) to track cross-generational references.
-The result is significant: 50-70% less CPU overhead for GC, better handling of high allocation
-rates, and lower memory overhead. The generational approach is now the default because the
-generational hypothesis — most objects die young — is so universally true that exploiting it is
-almost always beneficial.
+contribute to marking work and relocation overhead. Generational ZGC (JEP 439) was previewed in
+JDK 21 and became the default ZGC mode in JDK 23; it splits the heap into young and old
+generations. Young gen is collected frequently with minimal overhead (most objects are dead),
+while old gen is collected independently and less often. This required adding **store barriers**
+(in addition to load barriers) to track cross-generational references via region-level remembered
+sets. The result is significant: 50-70% less CPU overhead for GC, better handling of high
+allocation rates, and ~25% less heap headroom required. The generational approach is now the
+default because the generational hypothesis — most objects die young — is so universally true
+that exploiting it is almost always beneficial. The non-generational mode is being removed in
+upcoming releases.
+
+**Q11: In JDK 25, how would you pick between G1, Generational ZGC, and Generational Shenandoah
+for a new service?**
+
+A: Default choice for most services with 1-32GB heaps and p99 latency SLAs above ~50ms is G1 —
+it has the best throughput, smallest memory headroom, and the richest tooling. For strict
+latency SLAs (p99 < 1ms) on larger heaps (32GB+), or anywhere pause-time consistency is
+business-critical (trading, ad-serving, gaming matchmaking), I'd use Generational ZGC — now
+the default ZGC mode since JDK 23 via JEP 439. I'd plan for ~25% heap headroom above the live
+set and not rely on compressed oops. Generational Shenandoah (product feature in JDK 25 via
+JEP 521) is the choice when I want ZGC-class latency on mid-size heaps (2-128GB) with
+compressed oops, for bursty-allocation workloads, or when shipping on Temurin/Red Hat
+distributions. Shenandoah is not in Oracle JDK. In all three cases I'd enable
+`-XX:+UseStringDeduplication` if the heap has a high share of duplicate Strings and
+`-XX:+UseCompactObjectHeaders` (JEP 519, product in JDK 25) to shrink headers from 12 to 8
+bytes for object-heavy apps.
+
+**Q12: What does Project Leyden bring that CDS/AppCDS did not, and how do you use it in JDK 25?**
+
+A: CDS and AppCDS share read-only class metadata across JVM processes to reduce startup cost
+and memory. Project Leyden goes further: JEP 483 (JDK 24) added **AOT class loading and
+linking** — classes are pre-linked (verified, resolved, constant-pool-patched) in the cache,
+not just loaded. JEP 515 (JDK 25) added **AOT method profiling**, recording which methods the
+JIT should compile hot on next startup. JEP 514 (JDK 25) collapses the old three-step workflow
+(record / assemble / run) into a one-step training run: `java -XX:AOTCacheOutput=app.aot
+-jar app.jar run-load` and then deploy with `java -XX:AOTCache=app.aot -jar app.jar`. Reported
+gains on Spring PetClinic: ~40-45% faster startup and meaningfully reduced warm-up, because
+the JIT has profile data immediately. Unlike GraalVM Native Image, Leyden keeps full dynamic
+JVM capabilities (reflection, JVMTI, dynamic class loading). JEP 516 in JDK 26 (targeted 2026)
+makes the AOT cache GC-agnostic, which is what unlocks it for ZGC.
+
+**Q13: Your monitoring platform wants per-endpoint latency with per-GC-pause correlation.
+How would you build it?**
+
+A: I'd use **JFR event streaming** (`jdk.jfr.consumer.RecordingStream`, JEP 349) in-process
+to subscribe to `jdk.GCPhasePause`, `jdk.ObjectAllocationInNewTLAB`, and custom `Event`
+subclasses for my endpoints. The custom event records `endpoint`, `httpStatus`, `duration`,
+and a correlation id. I enable `-XX:StartFlightRecording=disk=true,maxsize=4g,maxage=24h` as
+a continuous ring buffer so an operator can always dump the last 24h with
+`jcmd <pid> JFR.dump`. A tiny agent thread consumes the live stream, serialises events to
+OTLP, and ships to a collector (Grafana Tempo / Datadog / Pyroscope). In JDK 25 I also enable
+JEP 509 CPU-time profiling (Linux) for accurate CPU attribution that sees native frames, and
+I rely on JEP 518 cooperative sampling which removes the safepoint bias that made older JFR
+CPU profiles unreliable. For ad-hoc deep dives I still reach for **async-profiler** to get
+flame graphs with hardware-event sampling (`cycles:p`) — JFR and async-profiler are
+complementary, not competing.
+
+**Q14: What are Compact Object Headers and when would you enable them?**
+
+A: Compact Object Headers (JEP 450 experimental in JDK 24, JEP 519 product feature in JDK 25)
+shrink the object header on 64-bit HotSpot from 12 bytes to **8 bytes** by packing the
+compressed Klass pointer directly into the mark word. Enable with
+`-XX:+UseCompactObjectHeaders`. Benchmarks show ~10-20% reduction in live heap for
+object-heavy workloads, up to 22% on SPECjbb2015, and ~8% CPU improvement from better cache
+density and lower GC pressure. I'd enable it after validating that my application doesn't
+break on the feature (it reshapes the mark word so some low-level tooling or `sun.misc.Unsafe`
+hackery might behave differently), and it pairs especially well with G1 and generational
+Shenandoah which benefit most from reduced live-set size. One caveat: the compressed Klass
+pointer encoding caps loaded classes at ~4 million — irrelevant in practice but worth knowing.
+
+**Q15: How is finalize() being replaced, and what's the migration path for legacy code that
+still uses it?**
+
+A: `Object.finalize()` is deprecated for removal (JEP 421 in JDK 18 deprecated finalization
+itself). On JDK 21+ you can run with `--finalization=disabled` to prove an app doesn't rely
+on it. The replacement is **`java.lang.ref.Cleaner`** for native resource cleanup combined
+with `AutoCloseable` + try-with-resources for deterministic cleanup. Migration path:
+(1) Add `implements AutoCloseable` and an explicit `close()` method, (2) register a `Cleaner`
+as a safety net that runs the same cleanup if the caller forgets to close, (3) ensure the
+`Cleanable.Runnable` captures only native handles and primitive state — never a reference to
+the enclosing object (otherwise the cleaner itself keeps the object alive and nothing ever
+cleans). For off-heap memory specifically, prefer the **FFM API `Arena`** over
+`ByteBuffer.allocateDirect` — `Arena.ofConfined()` gives deterministic release via
+try-with-resources and doesn't depend on the Cleaner running.

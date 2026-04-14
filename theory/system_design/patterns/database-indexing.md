@@ -78,6 +78,14 @@ Index only rows matching a condition. Smaller, faster, less write overhead.
 CREATE INDEX idx_active_users ON users(email) WHERE is_active = true;
 ```
 
+## Related Storage Concepts
+
+### Write-Ahead Log (WAL)
+Every committed write is first appended to a sequential log on disk before the data pages are updated. On crash, replay the WAL to recover. Powers: PostgreSQL WAL, MySQL redo log, SQLite WAL mode, almost all modern DBs. Also the basis for replication (streaming the WAL to replicas).
+
+### MVCC (Multi-Version Concurrency Control)
+Readers never block writers and vice versa. Each row has multiple versions tagged with transaction IDs; each transaction reads the snapshot consistent with its start time. Used by PostgreSQL, MySQL InnoDB, Oracle, CockroachDB. Downsides: tombstones / dead tuples must be vacuumed (PostgreSQL `VACUUM`, MySQL purge thread).
+
 ## Possible Interview Questions
 1. "Your query is slow. Walk me through how you'd diagnose and fix it with indexes."
 2. "Explain the difference between B-Tree and LSM Tree indexes. When would you use each?"

@@ -73,16 +73,17 @@ At-least-once delivery means consumers may process the same message multiple tim
 - **Exactly-once processing**: Supported by some frameworks (Kafka transactions + consumer offsets in the same transaction)
 
 ## HTTP Method Idempotency
-| Method | Idempotent | Safe |
+| Method | Idempotent (per RFC 9110) | Safe |
 |--------|-----------|------|
 | GET | Yes | Yes |
+| HEAD | Yes | Yes |
+| OPTIONS | Yes | Yes |
 | PUT | Yes | No |
 | DELETE | Yes | No |
-| HEAD | Yes | Yes |
 | POST | **No** | No |
-| PATCH | **No** | No |
+| PATCH | No (by spec — though individual PATCH bodies CAN be idempotent if designed so) | No |
 
-POST and PATCH need explicit idempotency mechanisms (idempotency keys).
+POST and most PATCH operations need explicit idempotency mechanisms (idempotency keys). Stripe, PayPal, AWS SQS, and most payment APIs standardize on the `Idempotency-Key` header — see [IETF draft-ietf-httpapi-idempotency-key](https://datatracker.ietf.org/doc/draft-ietf-httpapi-idempotency-key/).
 
 ## Possible Interview Questions
 1. "How do you prevent a user from being charged twice if the payment request is retried?"

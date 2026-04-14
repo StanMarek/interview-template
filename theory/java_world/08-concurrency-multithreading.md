@@ -1,5 +1,7 @@
 # Concurrency & Multithreading — Senior Engineer Interview Preparation
 
+> **Active practice:** jump to [Practice & Drills](#practice--drills) for the Must-Know checklist, interview traps, 2-minute oral drill, whiteboard coding problems, thread-dump debugging scenarios, a timed 30-minute mock, and a 48-hour review checklist. For deep virtual-thread / structured-concurrency evolution across versions, cross-reference [`11-java-versions-evolution.md`](11-java-versions-evolution.md).
+
 ---
 
 ## 1. Thread Lifecycle & Thread Pools
@@ -106,12 +108,13 @@ ThreadPoolExecutor executor = new ThreadPoolExecutor(
 
 ### Best Practices for Pool Sizing
 
-- **CPU-bound tasks:** `poolSize = N_cpus` (or `N_cpus + 1` to account for occasional page faults)
-- **IO-bound tasks:** `poolSize = N_cpus * (1 + W/C)` where `W` = wait time, `C` = compute time
-- **Mixed workloads:** Separate pools for CPU-bound and IO-bound work
-- Always use bounded queues in production to prevent OOM
-- Use `CallerRunsPolicy` for natural backpressure
-- With virtual threads (Java 21+), pool sizing for IO-bound work is largely irrelevant — use `newVirtualThreadPerTaskExecutor()`
+- **CPU-bound tasks:** `poolSize = N_cpus` (or `N_cpus + 1` to account for occasional page faults). Pool sizing still matters here — virtual threads do not help.
+- **IO-bound tasks on platform threads (legacy):** `poolSize = N_cpus * (1 + W/C)` where `W` = wait time, `C` = compute time. Brian Goetz's formula from *Java Concurrency in Practice*.
+- **IO-bound tasks on Java 21+:** Pool sizing is obsolete — use `Executors.newVirtualThreadPerTaskExecutor()`. Each task gets its own virtual thread; the JVM multiplexes them onto a small carrier pool.
+- **Mixed workloads:** Dedicated platform pool for CPU-bound work, virtual threads for IO-bound work. Never submit CPU-bound work that holds a virtual thread for a long time — it starves carrier threads.
+- Always use bounded queues in production pools to prevent OOM.
+- Use `CallerRunsPolicy` for natural backpressure on platform pools.
+- **Do not pool virtual threads.** They are cheap; create a new one per task. A pool defeats the purpose.
 
 ---
 
@@ -248,11 +251,36 @@ public CompletableFuture<OrderSummary> buildOrderSummary(long orderId) {
 }
 ```
 
+### CompletableFuture vs Virtual Threads vs Structured Concurrency
+
+A recurring senior question: "we have three ways to do async in Java — which do I pick?"
+
+| Concern | `CompletableFuture` | Virtual threads (plain) | `StructuredTaskScope` (Java 25) |
+|---------|---------------------|-------------------------|--------------------------------|
+| Programming style | Callback / dataflow | Synchronous, blocking | Synchronous, lexically scoped |
+| Cancellation | Manual (`future.cancel(true)`), often incomplete | Manual, hard to get right across threads | Automatic on scope exit/failure |
+| Error propagation | Via `exceptionally`/`handle`; easy to swallow | Via try/catch | Joiner rethrows on `join()` |
+| Stack traces | Usually lose the caller's frame | Full, natural | Full, including parent scope |
+| Best for | Pipelines with heavy transformation / fan-out | Migrating existing blocking code | New code structured as a family of subtasks |
+| Readability | Declarative but verbose | Best (linear code) | Best (linear + explicit lifetime) |
+
+**Rule of thumb for new code on Java 25:** write straight-line blocking code on virtual threads; reach for `StructuredTaskScope` the moment you need concurrent subtasks; reach for `CompletableFuture` only when you need pipeline composition or must interop with an existing async API.
+
 ---
 
 ## 3. Virtual Threads (Project Loom)
 
-Virtual threads (preview in Java 19, stable in Java 21) are lightweight threads managed by the JVM rather than the OS. They make the "one thread per request" model scalable.
+Virtual threads (preview in Java 19, stable in Java 21 via JEP 444) are lightweight threads managed by the JVM rather than the OS. They make the "one thread per request" model scalable.
+
+**Timeline for senior interviews:**
+
+| Version | JEP | What changed |
+|---------|-----|-------------|
+| Java 19 | JEP 425 | Preview |
+| Java 21 (LTS) | JEP 444 | Standard / GA |
+| Java 24 | JEP 491 | Reimplemented `synchronized` so virtual threads no longer pin the carrier when entering/holding monitors or calling `Object.wait()` |
+| Java 25 (LTS) | JEP 505 | Structured Concurrency — **5th preview** (still not final) |
+| Java 25 (LTS) | JEP 506 | Scoped Values finalized |
 
 ### How They Work
 
@@ -268,10 +296,12 @@ Platform Thread (carrier)     Virtual Thread
 ```
 
 - Virtual threads are **mounted** onto carrier (platform) threads for execution
+- The carrier pool is a dedicated `ForkJoinPool` sized by default to `Runtime.getRuntime().availableProcessors()` (tunable via `-Djdk.virtualThreadScheduler.parallelism=N`)
 - When a virtual thread blocks on IO, it is **unmounted** (its continuation is saved on the heap), freeing the carrier thread
 - The carrier thread can then run another virtual thread
 - When the IO completes, the virtual thread is **remounted** onto an available carrier
-- The JVM uses **continuations** under the hood to save/restore the virtual thread's stack
+- The JVM uses **continuations** (`jdk.internal.vm.Continuation`) under the hood to save/restore the virtual thread's stack
+- Use `Thread.currentThread().isVirtual()` to check at runtime; virtual thread names default to empty (platform threads default to `Thread-N`)
 
 ```java
 // Creating virtual threads
@@ -303,22 +333,31 @@ try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
 
 ### Pinning
 
-A virtual thread becomes **pinned** to its carrier thread when it cannot be unmounted:
+A virtual thread is **pinned** when it cannot be unmounted from its carrier.
 
-1. **Inside a `synchronized` block or method** -- the monitor is tied to the carrier
-2. **During a native method call (JNI/FFI)**
+**Historical pinning sources (Java 21–23):**
 
-Pinning does not cause correctness issues, but it defeats the purpose of virtual threads by tying up the carrier.
+1. Inside a `synchronized` block or method — the monitor was tied to the carrier
+2. During a native method call (JNI/FFI)
+3. Inside class initializers that block
 
-**Fix: Replace `synchronized` with `ReentrantLock`:**
+**Java 24+ (JEP 491) — `synchronized` no longer pins.** The JVM reimplemented the synchronized keyword and `Object.wait()` so virtual threads can suspend while holding a monitor. This removed the single biggest Loom migration pain point. Advice pre-Java-24 was "replace every `synchronized` with `ReentrantLock`" — that advice is **no longer necessary** on Java 24+.
+
+**Still pins (even on Java 25):**
+- Native calls (JNI)
+- `Object.wait()` inside a class initializer
+- Blocking while resolving symbolic references during class loading
+- Code that blocks inside `<clinit>`
+
+**If you are stuck on Java 21–23**, swap `synchronized` for `ReentrantLock` in blocks that contain blocking IO:
 
 ```java
-// BAD — pins virtual thread to carrier
+// OLD ADVICE (Java 21-23) — synchronized pins the virtual thread
 synchronized (lock) {
     connection.query(sql); // blocking IO while pinned
 }
 
-// GOOD — ReentrantLock allows unmounting
+// Workaround — ReentrantLock allows unmounting
 private final ReentrantLock lock = new ReentrantLock();
 
 lock.lock();
@@ -327,66 +366,147 @@ try {
 } finally {
     lock.unlock();
 }
+
+// Java 24+ — the original synchronized version is fine now.
 ```
 
-Use `-Djdk.tracePinnedThreads=short` to detect pinning at runtime.
+**Diagnostics:**
 
-### Structured Concurrency (Preview in Java 21+)
+| Flag / Event | What it does |
+|--------------|--------------|
+| `-Djdk.tracePinnedThreads=short` | Prints a short stack trace the first time a thread pins (Java 21+) |
+| `-Djdk.tracePinnedThreads=full` | Full stack trace for every pin event |
+| JFR event `jdk.VirtualThreadPinned` | Recorded automatically; inspect with JMC or `jfr print` |
+| JFR event `jdk.VirtualThreadSubmitFailed` | Carrier pool could not accept a virtual thread |
 
-Structured concurrency treats groups of concurrent tasks as a unit, ensuring clean lifecycle management:
+### Virtual Thread Anti-Patterns
+
+| Anti-pattern | Why it is wrong | Do this instead |
+|--------------|-----------------|-----------------|
+| Pooling virtual threads | Pooling exists to amortize creation cost. Virtual threads are cheap; pooling them serializes work and defeats the model | `Executors.newVirtualThreadPerTaskExecutor()` — one virtual thread per task |
+| Using virtual threads for CPU-bound loops | Still needs a carrier; just adds overhead | Fixed platform pool sized to `availableProcessors()` |
+| Heavy `ThreadLocal` with virtual threads | Each of millions of VTs allocates its own slot | `ScopedValue` (see below) |
+| `synchronized` around blocking IO on Java 21–23 | Pins the carrier | Use `ReentrantLock`, or upgrade to Java 24+ (JEP 491) |
+| Limiting concurrency via pool size | Virtual thread pools are illusory | Use `Semaphore` to cap concurrent IO |
+| Assuming `Thread.sleep()` is expensive | On a VT, it just parks the continuation | Fine to use — no carrier is blocked |
+
+### Structured Concurrency (still Preview in Java 25, JEP 505)
+
+Structured concurrency treats a group of concurrent subtasks as a single unit of work, confined to a lexical scope. If the enclosing task is cancelled, all subtasks are cancelled. If any subtask fails, siblings can be cancelled automatically. No leaks, no orphans.
+
+**API changes across versions (important for senior interviews):**
+
+| Java | Status | API style |
+|------|--------|-----------|
+| 21–23 | Preview | Constructor-based: `new StructuredTaskScope.ShutdownOnFailure()` |
+| 24 | Preview (reworked) | Factory methods + `Joiner` policies introduced |
+| 25 (LTS) | **5th Preview** (JEP 505) | `StructuredTaskScope.open(...)` factory, `Joiner` for shutdown policy |
+
+The Java 25 API is a sealed interface opened via static factories — **not** instantiated with `new`. Although it is still a preview feature in JDK 25 (enable with `--enable-preview`), this is the API shape you should be able to discuss in interviews in 2026. Don't claim it's "GA" or "final" — it isn't yet. See [`11-java-versions-evolution.md`](11-java-versions-evolution.md) for canonical version status.
 
 ```java
 import java.util.concurrent.StructuredTaskScope;
+import java.util.concurrent.StructuredTaskScope.Joiner;
+import java.util.concurrent.StructuredTaskScope.Subtask;
 
 record UserProfile(User user, List<Order> orders) {}
 
+// Default open() — fail-fast: first failure cancels siblings, join() rethrows
 UserProfile fetchProfile(long userId) throws Exception {
-    try (var scope = new StructuredTaskScope.ShutdownOnFailure()) {
-        // Fork subtasks — each runs in its own virtual thread
-        StructuredTaskScope.Subtask<User> userTask =
-            scope.fork(() -> userService.getUser(userId));
-        StructuredTaskScope.Subtask<List<Order>> ordersTask =
-            scope.fork(() -> orderService.getOrders(userId));
+    try (var scope = StructuredTaskScope.open()) {
+        Subtask<User> userTask   = scope.fork(() -> userService.getUser(userId));
+        Subtask<List<Order>> ord = scope.fork(() -> orderService.getOrders(userId));
 
-        scope.join();           // wait for all subtasks
-        scope.throwIfFailed();  // propagate any exception
+        scope.join(); // waits; throws if any subtask failed
 
-        return new UserProfile(userTask.get(), ordersTask.get());
+        return new UserProfile(userTask.get(), ord.get());
     }
-    // If any subtask fails, the other is cancelled automatically
-    // No leaked threads — scope ensures all are done before exiting
 }
 ```
 
-**Scope policies:**
-- `ShutdownOnFailure` -- cancels siblings if any subtask throws
-- `ShutdownOnSuccess` -- cancels siblings once the first subtask succeeds (useful for racing/hedging)
-
-### ScopedValue vs ThreadLocal
-
-`ScopedValue` (preview in Java 21+) is the virtual-thread-friendly replacement for `ThreadLocal`:
+**Joiner policies (Java 25):**
 
 ```java
-// ThreadLocal — mutable, must remember to clean up, expensive with virtual threads
-private static final ThreadLocal<User> CURRENT_USER = new ThreadLocal<>();
+// All-or-nothing: yields a stream of successful subtasks, throws on any failure
+try (var scope = StructuredTaskScope.open(Joiner.<String>allSuccessfulOrThrow())) {
+    scope.fork(() -> callA());
+    scope.fork(() -> callB());
+    Stream<Subtask<String>> results = scope.join();
+}
 
-// ScopedValue — immutable within scope, automatically scoped, efficient
-private static final ScopedValue<User> CURRENT_USER = ScopedValue.newInstance();
+// First success wins (hedging / racing)
+try (var scope = StructuredTaskScope.open(Joiner.<Price>anySuccessfulResultOrThrow())) {
+    scope.fork(() -> priceFromVendorA());
+    scope.fork(() -> priceFromVendorB());
+    Price winner = scope.join(); // cancels the slower sibling
+}
 
-// Binding a scoped value
-ScopedValue.runWhere(CURRENT_USER, authenticatedUser, () -> {
-    handleRequest(); // CURRENT_USER.get() returns authenticatedUser
-});
-// Outside the scope, CURRENT_USER.get() throws NoSuchElementException
+// Wait for all, inspect individually, never throw
+try (var scope = StructuredTaskScope.open(Joiner.<String>awaitAll())) {
+    Subtask<String> a = scope.fork(() -> callA());
+    Subtask<String> b = scope.fork(() -> callB());
+    scope.join();
+    // Inspect a.state() == Subtask.State.SUCCESS / FAILED / UNAVAILABLE
+}
 ```
 
-| Feature | `ThreadLocal` | `ScopedValue` |
-|---------|--------------|---------------|
-| Mutability | Mutable (`set()`/`get()`) | Immutable within scope |
-| Inheritance | Via `InheritableThreadLocal` (copies per child) | Efficient sharing with child scopes |
-| Cleanup | Manual (`remove()`) | Automatic when scope exits |
-| Virtual thread cost | High (each VT copies the ThreadLocal) | Low (shared reference) |
-| Rebinding | Anywhere | Only by entering a nested scope |
+**Configuration via `Configuration` lambda** (name, thread factory, timeout):
+
+```java
+try (var scope = StructuredTaskScope.open(
+        Joiner.<StockPrice>allSuccessfulOrThrow(),
+        cfg -> cfg.withName("stock-report")
+                  .withThreadFactory(Thread.ofVirtual().factory())
+                  .withTimeout(Duration.ofSeconds(5)))) {
+    scope.fork(() -> fetchAapl());
+    scope.fork(() -> fetchGoog());
+    var results = scope.join();
+}
+```
+
+**Why it matters for interviews:**
+- Replaces the `CompletableFuture` soup of `thenCombine`/`allOf` with readable imperative code
+- Cancellation is automatic and transitive — no more `future.cancel(true)` plumbing
+- Stack traces from subtasks show the parent scope (observability wins)
+- Pairs with virtual threads: each `fork()` spawns a VT, so thousands of concurrent subtasks are fine
+
+### Scoped Values (Standard in Java 25, JEP 506)
+
+`ScopedValue` is the virtual-thread-friendly replacement for `ThreadLocal`. Finalized in Java 25 after five previews (Java 20–24). It binds an **immutable** value to a lexical scope; the binding is visible to the scope's direct and indirect callees, and to subtasks forked from within.
+
+```java
+// Declaration — static final, like ThreadLocal
+public static final ScopedValue<User> CURRENT_USER = ScopedValue.newInstance();
+
+// Binding (Java 25 finalized API)
+ScopedValue.where(CURRENT_USER, authenticatedUser)
+    .run(() -> handleRequest()); // CURRENT_USER.get() returns authenticatedUser here
+
+// With a return value — use call() instead of run()
+String result = ScopedValue.where(CURRENT_USER, authenticatedUser)
+    .call(() -> renderPage());
+
+// Chain multiple bindings
+ScopedValue.where(CURRENT_USER, user)
+    .where(REQUEST_ID, id)
+    .run(() -> handleRequest());
+
+// Outside the scope: CURRENT_USER.isBound() == false; .get() throws NoSuchElementException
+// Java 25 change: orElse(null) is now rejected — use orElse(defaultValue) only
+```
+
+**Structured concurrency interop** — a `ScopedValue` binding is automatically visible in every subtask forked by a `StructuredTaskScope` inside that scope. This is the intended replacement for `InheritableThreadLocal`.
+
+| Feature | `ThreadLocal` | `ScopedValue` (Java 25) |
+|---------|--------------|-------------------------|
+| Mutability | Mutable (`set()`/`get()`/`remove()`) | Immutable within scope |
+| Inheritance to subtasks | Via `InheritableThreadLocal` (each child copies the reference) | Direct, efficient — no copy |
+| Cleanup | Manual (`remove()`); forgotten removes leak memory | Automatic on scope exit |
+| Virtual-thread cost | Allocates a slot per VT — prohibitive at millions of VTs | One shared immutable binding |
+| Rebinding | Anywhere via `set()` | Only by entering a nested `where().run(...)` |
+| Safety | Attacker/bug can mutate mid-request | Cannot be mutated — auditable |
+
+**When you still need `ThreadLocal`:** per-thread mutable caches (e.g., `SimpleDateFormat` instances, StringBuilder buffers) where the value must change over the thread's lifetime.
 
 ---
 
@@ -505,6 +625,71 @@ public class ParallelSum extends RecursiveTask<Long> {
 ---
 
 ## 5. Synchronization Primitives
+
+### ReentrantLock -- Explicit Lock Features
+
+`ReentrantLock` is the workhorse explicit lock. Features `synchronized` lacks:
+
+```java
+import java.util.concurrent.locks.*;
+
+ReentrantLock lock = new ReentrantLock(/* fair = */ false);
+
+// 1. Plain lock — same semantics as synchronized
+lock.lock();
+try { /* ... */ } finally { lock.unlock(); }
+
+// 2. Interruptible lock — throws if interrupted while waiting
+try {
+    lock.lockInterruptibly();
+    try { /* ... */ } finally { lock.unlock(); }
+} catch (InterruptedException e) {
+    Thread.currentThread().interrupt();
+}
+
+// 3. tryLock — return immediately, no wait
+if (lock.tryLock()) {
+    try { /* ... */ } finally { lock.unlock(); }
+} else {
+    // fall back to something else — classic deadlock-avoidance pattern
+}
+
+// 4. tryLock with timeout
+if (lock.tryLock(500, TimeUnit.MILLISECONDS)) {
+    try { /* ... */ } finally { lock.unlock(); }
+}
+
+// 5. Multiple Conditions — like multiple wait-sets on one monitor
+Condition notFull  = lock.newCondition();
+Condition notEmpty = lock.newCondition();
+
+lock.lock();
+try {
+    while (queue.isFull()) notFull.await();
+    queue.add(item);
+    notEmpty.signalAll();
+} finally {
+    lock.unlock();
+}
+
+// 6. Introspection — only available on ReentrantLock
+lock.isHeldByCurrentThread();
+lock.getHoldCount();
+lock.getQueueLength();  // waiting threads
+```
+
+**`synchronized` vs `ReentrantLock` decision matrix:**
+
+| Need | `synchronized` | `ReentrantLock` |
+|------|---------------|-----------------|
+| Simple mutual exclusion | Yes — preferred | Overkill |
+| Interruptible waits | No | `lockInterruptibly()` |
+| Try-lock / timeout | No | `tryLock()` |
+| Fairness policy | Never | `new ReentrantLock(true)` |
+| Multiple condition queues | Only the one monitor wait-set | `newCondition()` — many per lock |
+| Virtual-thread friendly (Java 21–23) | Pins carrier | No pinning |
+| Virtual-thread friendly (Java 24+) | No pinning (JEP 491) | No pinning |
+| Auto-unlock on scope exit | Yes (block scope) | No — must use `try/finally` |
 
 ### CountDownLatch -- Wait for N Events
 
@@ -683,16 +868,19 @@ public class ExchangerExample {
 
 ### ConcurrentHashMap
 
-The most important concurrent collection. Since Java 8, it uses **CAS + bucket-level (`synchronized`)** locking instead of the old segment-based approach.
+The most important concurrent collection. Since Java 8, it uses **CAS + bucket-level (`synchronized`)** locking instead of the pre-Java-8 segment-based (`Segment extends ReentrantLock`) approach.
 
-**Internals:**
-- Array of `Node` entries (like `HashMap`)
-- First node of each bucket is locked with `synchronized` for insertions
-- Reads are lock-free using `volatile` reads
-- Tree bins (like `HashMap`) when a bucket exceeds 8 entries
-- Default concurrency level is no longer meaningful (was for segments); the table resizes dynamically
+**Internals (Java 8+):**
+- Array of `Node<K,V>` entries — `Node.val` and `Node.next` are `volatile`
+- **Empty bucket:** insertion uses a single `CAS` on the table slot — no lock at all
+- **Non-empty bucket:** first node is used as a monitor via `synchronized (firstNode) { ... }` — contention is per-bucket, not per-segment
+- **Reads:** lock-free via `volatile` reads (Unsafe.getObjectVolatile on the table slot, then a plain read of the `volatile` field `val`)
+- **Treeify:** a bucket with more than 8 entries and the table size ≥ 64 converts from a linked list to a red-black tree (`TreeBin`). Degrades back to a list below 6 entries
+- **Resize:** triggered at 75% load factor. Threads that arrive during a resize help move buckets (cooperative resize) via `ForwardingNode` sentinels
+- **Size tracking:** uses a `LongAdder`-style striped counter (`CounterCell[]`) to avoid a single hot CAS for `size()`. `size()` is O(cells); prefer `mappingCount()` (returns `long`)
+- Constructor `concurrencyLevel` parameter is legacy from the segment era — only a hint to initial table sizing now
 
-**Atomic compute methods (critical for interviews):**
+**Atomic compound methods (critical for interviews):**
 
 ```java
 ConcurrentHashMap<String, Integer> map = new ConcurrentHashMap<>();
@@ -700,21 +888,33 @@ ConcurrentHashMap<String, Integer> map = new ConcurrentHashMap<>();
 // putIfAbsent — atomic check-and-put
 map.putIfAbsent("key", 1);
 
-// computeIfAbsent — atomic check-and-compute (lazy initialization)
+// computeIfAbsent — atomic; lambda runs at most once per absent key.
+// CAUTION: the lambda is executed under the bucket's synchronized lock,
+// so it must NOT call back into the same map (can deadlock).
 map.computeIfAbsent("key", k -> expensiveComputation(k));
 
-// compute — atomic update (replaces merge logic)
+// compute — atomic read-modify-write; pass null to remove
 map.compute("key", (k, v) -> v == null ? 1 : v + 1);
 
-// merge — atomic merge operation
+// merge — atomic; classic word-count primitive
 map.merge("key", 1, Integer::sum); // increment or initialize to 1
 
-// Bulk operations (parallelism threshold)
+// Bulk operations — parallelism threshold in elements
+// 1 = always parallel, Long.MAX_VALUE = always sequential
 map.forEach(1000, (k, v) -> System.out.println(k + "=" + v));
 long sum = map.reduceValuesToLong(1000, Integer::longValue, 0L, Long::sum);
+
+// KeySet as a concurrent set — `map.newKeySet()` returns a ConcurrentHashMap.KeySetView
+Set<String> concurrentSet = ConcurrentHashMap.newKeySet();
 ```
 
-**Important:** Never use `map.get()` + `map.put()` for compound operations -- that is not atomic even with `ConcurrentHashMap`. Always use `compute`, `merge`, `computeIfAbsent`.
+**Important:** `map.get()` + `map.put()` is not atomic even with `ConcurrentHashMap`. Always use `compute`, `merge`, `computeIfAbsent`, or `putIfAbsent` for check-then-act.
+
+**Gotchas:**
+- `null` keys and `null` values are rejected with `NullPointerException` — different from `HashMap`
+- `computeIfAbsent` blocks other writers to the same bucket while the lambda runs — don't do blocking IO there
+- `size()` and `isEmpty()` are weakly consistent during concurrent updates
+- Iterators are weakly consistent — never throw `ConcurrentModificationException`, may or may not reflect updates
 
 ### CopyOnWriteArrayList
 
@@ -988,9 +1188,47 @@ public class VarHandleExample {
 ```
 
 **Memory ordering modes (weakest to strongest):**
-- `Opaque` -- no reordering of accesses to this variable, but no cross-variable ordering
-- `Acquire/Release` -- ordered with respect to other acquire/release on the same variable
+- `Plain` -- no ordering, no atomicity guarantee for `long`/`double`
+- `Opaque` -- no reordering of accesses to this variable, but no cross-variable ordering; atomic
+- `Acquire/Release` -- pairwise ordering with other acquire/release on the same variable; cheaper than volatile on x86/ARM
 - `Volatile` -- full StoreLoad barrier, ordered with respect to all volatile operations
+
+`VarHandle` is what you reach for when writing a custom lock-free data structure and `AtomicXxx` wrappers add too much indirection per instance.
+
+### False Sharing and @Contended
+
+**False sharing** happens when two independent variables used by different threads land on the same CPU cache line (typically 64 bytes). Even though the threads do not share data logically, every write invalidates the cache line in the other thread's core, serializing what should be parallel work.
+
+```
+Cache line (64 bytes)
+┌───────────────────────────────┐
+│  counterA  │  counterB  │ ... │   Thread 1 writes counterA
+└───────────────────────────────┘   Thread 2 writes counterB
+          ↑           ↑           Both fight over the same line
+      Thread 1    Thread 2
+```
+
+**Fix: pad the hot fields onto separate cache lines.** Prefer `@Contended` (since Java 8) over hand-written padding:
+
+```java
+import jdk.internal.vm.annotation.Contended;
+
+public class Counters {
+    @Contended volatile long producerCount;
+    @Contended volatile long consumerCount;
+}
+```
+
+Run with `-XX:-RestrictContended` (pre-Java 16 some modules needed it) to allow `@Contended` outside `java.base`. `@Contended` is used internally by `LongAdder`, `ForkJoinPool`, `ConcurrentHashMap` counter cells, and `Thread`'s random seed fields.
+
+**Manual padding pattern (if you cannot use `@Contended`):**
+
+```java
+public class PaddedAtomicLong {
+    public volatile long value;
+    public long p1, p2, p3, p4, p5, p6, p7; // pad to 64 bytes
+}
+```
 
 ---
 
@@ -1367,7 +1605,47 @@ public class ObjectPool<T> {
 
 ---
 
-## 11. Common Senior Interview Questions
+## 11. java.util.concurrent.Flow -- Reactive Streams SPI
+
+Java 9 added `java.util.concurrent.Flow` as the standard reactive-streams SPI — four nested interfaces (`Publisher`, `Subscriber`, `Subscription`, `Processor`) that mirror the Reactive Streams 1.0 specification. It exists so libraries like RxJava, Reactor, Akka Streams, and RSocket can interoperate without a third-party dependency; the JDK itself ships only `SubmissionPublisher`.
+
+```java
+import java.util.concurrent.Flow.*;
+import java.util.concurrent.SubmissionPublisher;
+
+try (var publisher = new SubmissionPublisher<String>()) {
+    publisher.subscribe(new Subscriber<>() {
+        private Subscription sub;
+        @Override public void onSubscribe(Subscription s) {
+            this.sub = s;
+            s.request(1); // backpressure: request one item at a time
+        }
+        @Override public void onNext(String item) {
+            System.out.println("Got: " + item);
+            sub.request(1);
+        }
+        @Override public void onError(Throwable t) { t.printStackTrace(); }
+        @Override public void onComplete() { System.out.println("done"); }
+    });
+    publisher.submit("hello");
+    publisher.submit("world");
+}
+```
+
+**When to use:** you almost never implement `Flow` directly. It exists as the *lingua franca* between reactive libraries. In application code, use Reactor (`Mono`/`Flux`) or RxJava. In Java 21+, the need for reactive libraries drops dramatically — blocking code on virtual threads replaces most of the "reactive for scalability" use cases. Reactive is still useful for **true streaming / backpressure / declarative composition** (Kafka processors, event sourcing, WebFlux handlers). For simple "run N things concurrently," use virtual threads and `StructuredTaskScope`.
+
+**`HttpClient` Flow integration** (JDK 11+):
+
+```java
+HttpClient client = HttpClient.newHttpClient();
+HttpResponse<Flow.Publisher<List<ByteBuffer>>> resp = client.send(
+    request, HttpResponse.BodyHandlers.ofPublisher());
+// resp.body() is a Publisher — subscribe with a reactor/rxjava bridge
+```
+
+---
+
+## 12. Common Senior Interview Questions
 
 **Q1: What is the difference between `synchronized` and `ReentrantLock`? When would you choose one over the other?**
 
@@ -1396,11 +1674,15 @@ Without a HB relationship, two threads accessing the same variable (with at leas
 
 **Q3: What are virtual threads? How do they differ from platform threads? What are their limitations?**
 
-Virtual threads (Java 21) are lightweight threads managed by the JVM rather than the OS. A platform thread is a thin wrapper over an OS thread with a fixed ~1MB stack. Virtual threads have a dynamically growing stack (starting at ~few KB) stored on the heap, and the JVM multiplexes many virtual threads onto a small number of platform (carrier) threads.
+Virtual threads (GA in Java 21, JEP 444) are lightweight threads managed by the JVM rather than the OS. A platform thread is a thin wrapper over an OS thread with a fixed ~1MB stack. Virtual threads have a dynamically growing stack (starting at ~few KB) stored on the heap, and the JVM multiplexes many virtual threads onto a small pool of platform (carrier) threads — a `ForkJoinPool` sized by default to `availableProcessors()`.
 
 When a virtual thread blocks on IO, it is unmounted from its carrier thread (its continuation is saved to the heap), freeing the carrier to run other virtual threads. This makes the "one thread per request" model scalable to millions of concurrent tasks for IO-bound workloads.
 
-Limitations: (1) **Pinning** -- `synchronized` blocks and native calls pin the virtual thread to the carrier, preventing unmounting. Replace `synchronized` with `ReentrantLock`. (2) **No benefit for CPU-bound work** -- virtual threads still need carrier threads for execution, so CPU-bound tasks should use a fixed-size platform thread pool. (3) **ThreadLocal overhead** -- each virtual thread copies inherited ThreadLocals, which is wasteful at scale. Use `ScopedValue` instead. (4) **Pooling is counterproductive** -- do not pool virtual threads; create a new one per task.
+Limitations:
+1. **Pinning** -- historically `synchronized` blocks pinned the virtual thread to the carrier. **Fixed in Java 24 (JEP 491)**: `synchronized` and `Object.wait()` no longer pin. The "replace `synchronized` with `ReentrantLock`" advice is obsolete on Java 24+. Native calls (JNI) and class-initializer waits can still pin.
+2. **No benefit for CPU-bound work** -- virtual threads still need carrier threads for execution, so CPU-bound tasks should use a fixed-size platform thread pool.
+3. **ThreadLocal overhead** -- each virtual thread allocates its own slots, which is wasteful at scale. Use `ScopedValue` (standard in Java 25, JEP 506) for request-scoped data.
+4. **Pooling is counterproductive** -- do not pool virtual threads; create a new one per task via `Executors.newVirtualThreadPerTaskExecutor()`. Use `Semaphore` to cap concurrency on downstream resources.
 
 ---
 
@@ -1475,3 +1757,178 @@ Use `volatile` when: you have a simple flag or status variable that is written b
 This provides much higher throughput in read-heavy scenarios because optimistic reads are essentially free (no CAS, no memory barriers beyond volatile reads). `ReentrantReadWriteLock` always acquires a shared read lock, which involves CAS operations and can cause contention.
 
 Trade-offs: (1) `StampedLock` is NOT reentrant -- attempting to re-acquire a lock you already hold causes deadlock. (2) It does not support `Condition` objects. (3) Optimistic reads require careful coding (read values into locals, then validate). (4) It does not support fairness policies. Use `StampedLock` for performance-critical read-heavy paths; use `ReentrantReadWriteLock` when you need reentrancy or conditions.
+
+---
+
+**Q11: What is Structured Concurrency in Java 25 and why does it replace the `ExecutorService` + `Future` pattern?**
+
+Structured concurrency (JEP 505, **still preview** in Java 25 — 5th preview round; requires `--enable-preview`) confines a group of concurrent subtasks to a **lexical scope** — the `try (var scope = StructuredTaskScope.open(...))` block. Inside, you `scope.fork(...)` subtasks (each on a virtual thread) and call `scope.join()`. The scope guarantees that when the block exits, all subtasks have completed, been cancelled, or failed; no task outlives its parent.
+
+It replaces `ExecutorService` + `Future` for three reasons: (1) **Cancellation is transitive and automatic** — if the parent task is interrupted or any subtask fails (with the default `open()` or `allSuccessfulOrThrow()` joiner), siblings are cancelled. With `ExecutorService` you had to manage `future.cancel(true)` manually and often leaked threads. (2) **Error propagation is built in** — `join()` rethrows the first exception, instead of wrapping it in `ExecutionException` three levels deep. (3) **Observability is natural** — thread dumps show the scope hierarchy, and stack traces include the parent.
+
+Joiner policies cover the common patterns: `Joiner.awaitAll()` (no early cancel), `allSuccessfulOrThrow()` (fail fast, yield a `Stream`), `anySuccessfulResultOrThrow()` (first success wins — hedging). For Java 25 interviews, remember: `StructuredTaskScope` is a **sealed interface** opened with a **static factory**, not `new`. That API change happened late in the preview cycle.
+
+---
+
+**Q12: Why should I replace `ThreadLocal` with `ScopedValue`? When is `ThreadLocal` still the right answer?**
+
+`ScopedValue` (JEP 506, finalized in Java 25) is designed for virtual threads. The problem with `ThreadLocal` on Loom is memory: at millions of virtual threads, each `ThreadLocal` instance allocates a slot per thread. `InheritableThreadLocal` makes it worse — children copy the parent's map.
+
+`ScopedValue` stores one immutable binding shared by the scope and its descendants, including subtasks forked from a `StructuredTaskScope`. Syntax is `ScopedValue.where(KEY, value).run(() -> ...)`. Callees read with `KEY.get()`. When the lambda returns, the binding is gone — no `remove()`, no leak, no way for downstream code to mutate it.
+
+Use `ScopedValue` for: request-scoped data (current user, tenant, trace ID, locale), anything you would have stored in `InheritableThreadLocal`, security principals that must not be tampered with mid-request.
+
+Keep `ThreadLocal` for: per-thread mutable caches where the value genuinely evolves over the thread's life — `SimpleDateFormat` instances, reusable `StringBuilder` buffers, or JIT-friendly thread-local object pools. If the value is set once per request/operation and only read, it should be a `ScopedValue`.
+
+---
+
+**Q13: Java 24's JEP 491 fixed virtual-thread pinning for `synchronized`. What actually changed, and what still pins?**
+
+Before Java 24, entering a `synchronized` block on a virtual thread tied the VT to its carrier — the carrier could not run other VTs until the synchronized section exited. Worse, `Object.wait()` inside `synchronized` pinned too. Any blocking IO under a monitor on Java 21–23 effectively wasted a carrier thread, and the mitigation was to rewrite monitors as `ReentrantLock`.
+
+JEP 491 reimplemented Java monitors. Virtual threads now unmount cleanly while holding or waiting on a monitor; the monitor identity is preserved across mount/unmount cycles. The practical consequence: existing Java libraries that use `synchronized` (JDBC drivers, standard collections, logging frameworks) became virtual-thread-friendly overnight on Java 24, with no source changes.
+
+What still pins: (1) Native frames — JNI calls freeze the stack, so a VT calling into native code cannot unmount. (2) Blocking inside a class initializer (`<clinit>`) or while another thread is initializing a class. (3) `Unsafe.park` with a pinned parker (rare). For interview purposes: know that the historical advice "replace all `synchronized` with `ReentrantLock` for virtual threads" is **outdated on Java 24+** but was correct on Java 21–23.
+
+---
+
+**Q14: What is false sharing? How do you detect and fix it?**
+
+False sharing occurs when two threads update distinct variables that happen to sit on the same CPU cache line (64 bytes on most x86/ARM). Every write invalidates the whole line in the other core's cache, triggering a cache-coherence round trip. The threads are not logically contending, but the hardware serializes them anyway. Symptom: a "parallel" counter benchmark runs slower with more threads.
+
+Detection: profile with `perf c2c` (Linux) or JFR `jdk.CPULoad` / `jdk.ThreadCPULoad` events combined with cache-miss counters. At the Java level, a good smell is two hot `volatile` fields in the same object updated by different threads.
+
+Fix: separate the hot fields onto different cache lines. The canonical tool is `jdk.internal.vm.annotation.Contended` (requires `--add-exports java.base/jdk.internal.vm.annotation=ALL-UNNAMED` or `-XX:-RestrictContended` depending on the module). `@Contended` is what `LongAdder`, `ConcurrentHashMap.CounterCell`, and `ForkJoinPool` use internally. Manual padding — extra `long` fields between hot fields — works but is brittle across JVM versions because the JIT can reorder or elide them. `@Contended` is the senior answer.
+
+---
+
+**Q15: Given an IO-bound service on Java 25, what is your default concurrency architecture?**
+
+Defaults I would reach for in an interview:
+
+1. **Virtual threads for the request path.** `Executors.newVirtualThreadPerTaskExecutor()` for the HTTP entry point. One virtual thread per in-flight request. No pool sizing debate.
+2. **`StructuredTaskScope` for fan-out.** Any request that calls multiple downstreams in parallel uses `StructuredTaskScope.open(Joiner.allSuccessfulOrThrow(), cfg -> cfg.withTimeout(...))`. Cancellation and error propagation come for free.
+3. **`ScopedValue` for request context.** Trace ID, tenant, authenticated principal — bind once at the handler, read anywhere without passing parameters.
+4. **`Semaphore` to cap downstream fan-out.** Virtual threads are cheap, but the DB connection pool, downstream rate limit, or file-descriptor budget are not. `Semaphore` around the blocking call is the right knob.
+5. **A small platform pool for CPU-bound work.** Any hashing, compression, or image processing goes on a `Executors.newFixedThreadPool(availableProcessors())`, scheduled from the virtual thread via `CompletableFuture.supplyAsync(task, cpuPool).join()`.
+6. **`ReentrantLock` / `StampedLock` where monitors were hot.** Only needed pre-Java-24; on Java 25, `synchronized` is fine again.
+7. **Bounded `BlockingQueue`s with backpressure.** Never unbounded — OOM is the number-one production failure mode.
+
+This architecture replaces most `CompletableFuture` pipelines and all legacy `ExecutorService` + pool-sizing formulas for IO.
+
+---
+
+## Practice & Drills
+
+Active recall section — do not re-read the theory above before attempting these. Close the file, open a blank buffer, and time yourself.
+
+### Must Know
+
+- Six `Thread.State` values and the transitions between them.
+- Happens-before rules: program order, monitor lock, `volatile`, `Thread.start/join`, `final` field freeze, transitivity.
+- `synchronized` vs `ReentrantLock` differences; on Java 24+ virtual-thread pinning for `synchronized` is **gone** (JEP 491).
+- `volatile` gives visibility + ordering, **not** atomicity. `count++` on a `volatile` is still racy.
+- Atomic compound ops on `ConcurrentHashMap`: `computeIfAbsent`, `compute`, `merge`. Never `get` then `put`.
+- Virtual threads are for **IO-bound** work. Do **not** pool them. Cap downstream concurrency with `Semaphore`.
+- `StructuredTaskScope` is opened via `StructuredTaskScope.open(...)` (static factory), not `new`.
+- `ScopedValue` replaces `ThreadLocal` for request-scoped read-only data under Loom.
+- Executor rejection policy, bounded queues, and backpressure: unbounded queues are the #1 production OOM.
+- Deadlock prevention: global lock ordering, `tryLock` with timeout, or lock-free designs.
+- CAS, ABA, `AtomicStampedReference`; `LongAdder` beats `AtomicLong` under high contention.
+- False sharing: `@Contended` (or `@jdk.internal.vm.annotation.Contended`) separates hot fields.
+- JMM minimum for a correct publication: either `final` field, `volatile` reference, or publication via a properly synchronized action.
+- `notify()` is a footgun — almost always use `notifyAll()` or a `Condition`.
+
+### Common Traps
+
+Eight to twelve fast-to-fail interview traps. If you cannot explain **why** each is broken in one sentence, you are not ready.
+
+1. **Shared `SimpleDateFormat`.** Not thread-safe; produces corrupted output or exceptions under concurrency. Fix: `DateTimeFormatter` (immutable, thread-safe) or `ThreadLocal<SimpleDateFormat>`.
+2. **Double-checked locking without `volatile`.** Partially constructed object can leak; the reader sees a non-null reference to a half-initialized instance. Fix: `volatile` on the field, or Initialization-on-Demand Holder idiom.
+3. **`notify()` vs `notifyAll()`.** With multiple wait conditions on one monitor, `notify()` may wake the wrong waiter — lost wake-up and indefinite hang. Default to `notifyAll()` or `Condition.signalAll()`; better, use one `Condition` per predicate.
+4. **`Thread.stop` / `Thread.suspend` / `Thread.resume`.** All deprecated for removal. They leave monitors in inconsistent states. Use interruption + a cooperative shutdown flag.
+5. **Virtual-thread pinning on `synchronized`.** Correct advice on Java 21–23, **wrong** on Java 24+. Interviewer testing whether you know JEP 491. What still pins: JNI frames and class-initializer waits.
+6. **Checking `isInterrupted()` but swallowing `InterruptedException`.** A bare `catch (InterruptedException e) {}` drops the interrupt flag. Either rethrow or `Thread.currentThread().interrupt()`.
+7. **`ExecutorService` without a bounded queue.** `Executors.newFixedThreadPool(n)` uses an **unbounded** `LinkedBlockingQueue`. Under overload it grows until OOM. Build the pool manually with a bounded queue + explicit `RejectedExecutionHandler`.
+8. **Pooling virtual threads.** `Executors.newFixedThreadPool(...)` with virtual threads defeats the entire design. Use `newVirtualThreadPerTaskExecutor()`.
+9. **Using `parallelStream()` for blocking IO.** It runs on the common `ForkJoinPool` shared by the whole JVM; blocking there starves every other parallel stream consumer.
+10. **`ConcurrentHashMap.size()` is an estimate.** Exact counting requires `mappingCount()` plus external coordination. Do not assume strong consistency.
+11. **Reading a non-`volatile` flag in a polling loop.** JIT hoists the read out of the loop; the writer's update is never observed. Fix: `volatile` or `AtomicBoolean`.
+12. **`synchronized(String_literal)` or `synchronized(Integer.valueOf(...))`.** Interned / cached objects are shared globally — unrelated code can deadlock you. Always lock on a dedicated `private final Object lock = new Object();`.
+
+### 2-Minute Answer Drill
+
+Oral-style: give the model answer out loud in under 15 seconds each.
+
+1. **What does `volatile` guarantee?** Visibility and ordering across threads; **not** atomicity for read-modify-write.
+2. **How does `ConcurrentHashMap` make `get()` lock-free?** `volatile` array + node fields; writes synchronize on the first bucket node only.
+3. **When do virtual threads pin on Java 24?** JNI frames and class-initializer waits. `synchronized` no longer pins.
+4. **Why is `StampedLock` not reentrant?** It is stamp-based, not owner-tracking. Re-acquiring deadlocks the owner.
+5. **Default executor for a web request path on Java 25?** `Executors.newVirtualThreadPerTaskExecutor()`, one VT per request.
+6. **Name three happens-before edges.** `volatile` write → subsequent read; monitor unlock → subsequent lock; `Thread.start()` → first action of the started thread.
+7. **When is `LongAdder` better than `AtomicLong`?** High write contention; it trades exact point-in-time reads for scalable striping.
+8. **`CountDownLatch` vs `CyclicBarrier`?** Latch is one-shot, N-counters-down, M-waiters. Barrier is reusable, all-N-must-arrive.
+9. **What breaks with `Executors.newFixedThreadPool(n)`?** Unbounded queue — no backpressure, OOM risk under overload.
+10. **What replaces `ThreadLocal` under Loom and why?** `ScopedValue` — immutable, scoped binding that does not allocate per virtual thread.
+
+### Whiteboard / Coding Drill
+
+Five problems to implement from a blank file. Target: 20–30 min each. Suggested location `src/main/java/com/stanmarek/concurrency/` — **no skeletons currently exist there**, so the signatures below are your starting point.
+
+1. **Bounded Blocking Queue** — `public final class BoundedBlockingQueue<E> { void put(E e) throws InterruptedException; E take() throws InterruptedException; int size(); }`. Hint: `ReentrantLock` + two `Condition`s (`notFull`, `notEmpty`). Always re-check the predicate in a `while` loop — spurious wakeups are real. Signal the *other* condition after each op.
+2. **Read-Write Lock (from scratch)** — `public final class SimpleRWLock { void readLock(); void readUnlock(); void writeLock(); void writeUnlock(); }`. Hint: single monitor, counters `readers` and `writers`, plus a `writeRequests` counter to avoid writer starvation. Do not use `ReentrantReadWriteLock`; the point is to show the state machine.
+3. **Token-Bucket Rate Limiter** — `public final class TokenBucket { TokenBucket(long capacity, long refillPerSecond); boolean tryAcquire(long tokens); }`. Hint: lazy refill on each call using `System.nanoTime()`; clamp `tokens` to `capacity`. Use `AtomicLong` for `tokens` + `lastRefillNanos` via a single `compareAndSet` loop, or wrap with `ReentrantLock` for clarity.
+4. **Producer-Consumer with `CompletableFuture`** — `CompletableFuture<List<R>> processAll(Stream<T> inputs, Function<T, R> work, Executor exec)`. Hint: map each input to `CompletableFuture.supplyAsync(() -> work.apply(x), exec)`, collect into a list, then `CompletableFuture.allOf(...).thenApply(v -> list.stream().map(CompletableFuture::join).toList())`. Back the executor with a **bounded** queue to avoid runaway memory.
+5. **Thread-Safe LRU Cache** — `public final class LruCache<K,V> { LruCache(int capacity); V get(K k); void put(K k, V v); }`. Hint: `LinkedHashMap` with `accessOrder=true` wrapped in a `ReentrantLock`, overriding `removeEldestEntry`. For higher throughput, split into shards keyed by `key.hashCode()` — each shard has its own lock. Discuss trade-off vs Caffeine in the interview.
+
+### Debugging Drill
+
+Five scenarios. You have a thread dump (`jstack <pid>`) or JFR recording. Diagnose in one paragraph.
+
+1. **Classic deadlock.**
+   *Symptom:* service wedged; two request threads pegged, CPU 0%.
+   *In `jstack`:* look for `Found one Java-level deadlock:` footer — the JVM prints the cycle. Otherwise: two threads both `BLOCKED on 0x…`, each waiting on a monitor held by the other, identified by `- waiting to lock <0xA>` and `- locked <0xB>`. Fix: impose lock ordering or use `tryLock` with timeout.
+2. **Lost wake-up.**
+   *Symptom:* queue consumer hangs forever even though producers have clearly pushed items.
+   *In `jstack`:* a thread `WAITING` on `Object.wait` inside a `synchronized` that holds no producer. The tell is that the producer uses `notify()` (singular) with multiple waiters on different predicates, or signals **before** the consumer checks the predicate. Also check for missing `while` loop around `wait()`. Fix: `notifyAll()` or per-predicate `Condition`; always `while (!cond) wait();`.
+3. **False sharing slowdown.**
+   *Symptom:* parallel counter benchmark gets **slower** as threads increase on an 8-core box. CPU is 100% but throughput flatlines.
+   *In JFR:* `jdk.CPULoad` near max, `jdk.ThreadCPULoad` even across workers, but `perf c2c` (outside JFR) shows hot cache-line bouncing. At the Java level: two `volatile long` fields in the same object, updated by different threads. Fix: `@Contended` or use `LongAdder`.
+4. **Virtual-thread pinning (Java 21–23).**
+   *Symptom:* service on Loom handles far fewer concurrent requests than expected; carrier pool saturates.
+   *In JFR:* enable `jdk.VirtualThreadPinned` events (`-Djdk.tracePinnedThreads=full` prints stacks). Each event shows a stack frame inside `synchronized` or a JNI call. On Java 24+, only JNI / class-init frames should still appear — if you see monitor frames there, you are not on 24+. Fix (pre-24): replace hot `synchronized` with `ReentrantLock`. Post-24: just upgrade.
+5. **GC pause vs STW safepoint confusion.**
+   *Symptom:* occasional multi-second latency spikes; application logs show gaps where no thread did anything.
+   *In JFR:* check `jdk.GCPhasePause` (actual GC pauses) vs `jdk.SafepointBegin` / `SafepointStateSynchronization` (time-to-safepoint). If GC pauses are short but total safepoint pauses are long, a thread is slow to reach a safepoint — common culprits: counted loops over huge arrays without safepoint polls, JNI calls, or biased-locking revocation on older JVMs. Fix: enable `-XX:+UseCountedLoopSafepoints` if not on by default, inspect the laggard thread's stack at the safepoint-sync event. Do not confuse "STW" with "GC" — every safepoint is STW, not every STW is GC.
+
+### Timed Practice
+
+A single 30-minute mock. No notes. Speak answers aloud or write bullets; don't write essays.
+
+> **Minute 0–5.** (Q1) Walk through the six `Thread.State` values and draw the transition diagram. (Q2) What HB guarantees does `volatile` provide that a plain field does not?
+>
+> **Minute 5–10.** (Q3) Write a thread-safe singleton three ways and rank them. Which is safest on Java 24 for virtual threads?
+>
+> **Minute 10–18.** (Q4 — whiteboard) Implement a **bounded blocking queue** with `ReentrantLock` + `Condition`. Talk through each `await` / `signal`.
+>
+> **Minute 18–23.** (Q5) Given a service that saturates carrier threads on Java 23, you suspect pinning. How do you confirm, and what do you change?
+>
+> **Minute 23–30.** (Q6) Design the executor strategy for an IO-bound web service on Java 25 that must call 3 downstreams per request, cap DB connections at 50, and protect a CPU-bound hashing step. Sketch code.
+
+Score yourself: full credit only if the answer lands inside the time budget. Re-drill any question where you needed more than 20% overrun.
+
+### Review Checklist (48-hour revision)
+
+Final pass the day before and morning of the interview.
+
+- [ ] Can I recite the six happens-before edges without peeking?
+- [ ] Do I know which JDK version fixed virtual-thread `synchronized` pinning, and what still pins?
+- [ ] Can I write a correct double-checked singleton in under 60 seconds?
+- [ ] Can I explain why `Executors.newFixedThreadPool` is unsafe in production without prompting?
+- [ ] Can I name three atomic compound operations on `ConcurrentHashMap`?
+- [ ] Can I diagnose deadlock, lost wake-up, and false sharing from a thread dump?
+- [ ] Can I articulate when `StructuredTaskScope` replaces `ExecutorService` and when it does not?
+- [ ] Do I know the signature `StructuredTaskScope.open(Joiner...)` (static factory, **not** `new`)?
+- [ ] Can I choose between `ThreadLocal` and `ScopedValue` for a given case in one sentence?
+- [ ] Can I size a platform-thread pool with Brian Goetz's `N * (1 + W/C)` formula and justify each variable?
+- [ ] Have I re-solved the five whiteboard problems in this file at least once from a blank buffer?

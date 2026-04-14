@@ -22,8 +22,8 @@ PriorityQueue<Integer> minHeap = new PriorityQueue<>();
 // Max-heap
 PriorityQueue<Integer> maxHeap = new PriorityQueue<>(Comparator.reverseOrder());
 
-// Custom comparator — sort by second element
-PriorityQueue<int[]> pq = new PriorityQueue<>((a, b) -> a[1] - b[1]);
+// Custom comparator — sort by second element (use comparingInt to avoid overflow)
+PriorityQueue<int[]> pq = new PriorityQueue<>(Comparator.comparingInt(a -> a[1]));
 
 // Common operations
 pq.offer(element);      // insert — O(log n)
@@ -34,7 +34,7 @@ pq.isEmpty();
 pq.remove(element);     // remove specific element — O(n)
 pq.contains(element);   // check existence — O(n)
 
-// Initialize from collection — O(n) heapify
+// Initialize from collection — O(n) heapify (bulk build, NOT n × O(log n))
 PriorityQueue<Integer> pq = new PriorityQueue<>(Arrays.asList(3, 1, 4, 1, 5));
 ```
 
@@ -79,7 +79,7 @@ public int[] topKFrequent(int[] nums, int k) {
     for (int n : nums) freq.merge(n, 1, Integer::sum);
 
     PriorityQueue<Integer> minHeap = new PriorityQueue<>(
-        (a, b) -> freq.get(a) - freq.get(b)
+        Comparator.comparingInt(freq::get)
     );
 
     for (int key : freq.keySet()) {
@@ -102,7 +102,7 @@ public int[] topKFrequent(int[] nums, int k) {
 ```java
 public ListNode mergeKLists(ListNode[] lists) {
     PriorityQueue<ListNode> pq = new PriorityQueue<>(
-        (a, b) -> a.val - b.val
+        Comparator.comparingInt(n -> n.val)
     );
 
     for (ListNode head : lists) {
@@ -142,6 +142,8 @@ class MedianFinder {
         if (lo.size() > hi.size()) return lo.peek();
         return (lo.peek() + hi.peek()) / 2.0;
     }
+    // For sliding window: combine with a "delete" HashMap<Integer,Integer>
+    // and lazily purge stale roots on peek/poll. O(n log k).
 }
 // Each addNum: O(log n), findMedian: O(1)
 ```
@@ -151,7 +153,7 @@ class MedianFinder {
 ```java
 // Meeting Rooms II — minimum meeting rooms required
 public int minMeetingRooms(int[][] intervals) {
-    Arrays.sort(intervals, (a, b) -> a[0] - b[0]);
+    Arrays.sort(intervals, Comparator.comparingInt(a -> a[0]));
     PriorityQueue<Integer> endTimes = new PriorityQueue<>(); // min-heap of end times
 
     for (int[] interval : intervals) {
@@ -164,6 +166,47 @@ public int minMeetingRooms(int[][] intervals) {
 }
 ```
 
+```java
+// Task Scheduler — cooldown n between identical tasks (greedy + max-heap)
+public int leastInterval(char[] tasks, int n) {
+    int[] freq = new int[26];
+    for (char c : tasks) freq[c - 'A']++;
+    PriorityQueue<Integer> maxHeap = new PriorityQueue<>(Comparator.reverseOrder());
+    for (int f : freq) if (f > 0) maxHeap.offer(f);
+
+    int time = 0;
+    Deque<int[]> cooldown = new ArrayDeque<>(); // {remainingCount, availableAt}
+    while (!maxHeap.isEmpty() || !cooldown.isEmpty()) {
+        time++;
+        if (!maxHeap.isEmpty()) {
+            int left = maxHeap.poll() - 1;
+            if (left > 0) cooldown.offer(new int[]{left, time + n});
+        }
+        if (!cooldown.isEmpty() && cooldown.peek()[1] == time)
+            maxHeap.offer(cooldown.poll()[0]);
+    }
+    return time;
+}
+```
+
+```java
+// IPO — pick up to k projects to maximize capital (two heaps: min-cost + max-profit)
+public int findMaximizedCapital(int k, int w, int[] profits, int[] capital) {
+    int n = profits.length;
+    PriorityQueue<int[]> minCost = new PriorityQueue<>(Comparator.comparingInt(a -> a[0]));
+    PriorityQueue<Integer> maxProfit = new PriorityQueue<>(Comparator.reverseOrder());
+    for (int i = 0; i < n; i++) minCost.offer(new int[]{capital[i], profits[i]});
+
+    while (k-- > 0) {
+        while (!minCost.isEmpty() && minCost.peek()[0] <= w)
+            maxProfit.offer(minCost.poll()[1]); // unlock affordable projects
+        if (maxProfit.isEmpty()) break;
+        w += maxProfit.poll();
+    }
+    return w;
+}
+```
+
 ### 5. K Closest Points / K-Way Merge
 
 ```java
@@ -171,7 +214,7 @@ public int minMeetingRooms(int[][] intervals) {
 public int[][] kClosest(int[][] points, int k) {
     // Max-heap by distance — keep K closest
     PriorityQueue<int[]> maxHeap = new PriorityQueue<>(
-        (a, b) -> (b[0]*b[0] + b[1]*b[1]) - (a[0]*a[0] + a[1]*a[1])
+        Comparator.comparingInt((int[] a) -> -(a[0]*a[0] + a[1]*a[1]))
     );
 
     for (int[] p : points) {
@@ -180,6 +223,24 @@ public int[][] kClosest(int[][] points, int k) {
     }
     return maxHeap.toArray(new int[k][]);
 }
+```
+
+```java
+// Kth Smallest Element in a Sorted Matrix — row-wise k-way merge
+public int kthSmallest(int[][] matrix, int k) {
+    int n = matrix.length;
+    // {value, row, col} — min-heap seeded with first column
+    PriorityQueue<int[]> pq = new PriorityQueue<>(Comparator.comparingInt(a -> a[0]));
+    for (int r = 0; r < Math.min(n, k); r++) pq.offer(new int[]{matrix[r][0], r, 0});
+
+    for (int i = 0; i < k - 1; i++) {
+        int[] cur = pq.poll();
+        if (cur[2] + 1 < n)
+            pq.offer(new int[]{matrix[cur[1]][cur[2] + 1], cur[1], cur[2] + 1});
+    }
+    return pq.peek()[0];
+}
+// Time: O(min(n,k) + k log min(n,k))
 ```
 
 ### 6. Lazy Deletion Pattern
@@ -200,6 +261,12 @@ while (!pq.isEmpty() && deleted.contains(pq.peek())) {
 int next = pq.poll();
 ```
 
+### 7. Heap Variants (Know They Exist)
+
+- **Indexed Priority Queue:** Pairs a heap with a `Map<Key, Index>` to support O(log n) `decreaseKey` / `update`. Not in the JDK — roll your own or simulate by re-inserting and using lazy deletion. Useful in Dijkstra/Prim when edges relax.
+- **Fibonacci heap:** O(1) amortized `insert` and `decreaseKey`, O(log n) `extractMin`. Gives Dijkstra its optimal O(E + V log V) bound. Rarely implemented in practice — binary heap wins on constants. Mention it only if asked about theoretical optima.
+- **Pairing / d-ary heaps:** Simpler alternatives with good practical performance; d-ary (e.g., 4-ary) reduces tree height vs binary.
+
 ## Common Interview Problems
 
 ### Easy
@@ -214,8 +281,9 @@ int next = pq.poll();
 - Furthest Building You Can Reach
 
 ### Hard
-- Find Median from Data Stream, Sliding Window Median
+- Find Median from Data Stream, Sliding Window Median (two heaps + lazy deletion map)
 - IPO, Trapping Rain Water II, Smallest Range Covering Elements from K Lists
+- Kth Smallest Element in a Sorted Matrix, Find K Pairs with Smallest Sums
 
 ## Tips and Pitfalls
 
@@ -223,6 +291,9 @@ int next = pq.poll();
 - **Comparator subtraction overflow:** `(a, b) -> a - b` can overflow for large values. Use `Integer.compare(a, b)` for safety.
 - **Min-heap for top K largest, max-heap for top K smallest.** This is counterintuitive — think of it as "the heap guards the boundary."
 - **Cannot efficiently search or update.** Use lazy deletion or a `TreeMap` if you need both ordered access and efficient removal by key.
-- **heapify is O(n), not O(n log n).** Building a heap from n elements is linear. Inserting one at a time is O(n log n).
+- **heapify is O(n), not O(n log n).** Building a heap from n elements is linear (bottom-up sift-down). Inserting one at a time is O(n log n). Prefer `new PriorityQueue<>(collection)` over a loop of `offer`.
 - **Custom objects:** Implement `Comparable` or pass a `Comparator`. Without ordering, `PriorityQueue` throws `ClassCastException`.
+- **No decrease-key.** Java's `PriorityQueue` has no `decreaseKey`; `remove(obj)` is O(n). For Dijkstra, either re-insert with the new key and skip stale entries on poll, or use an indexed PQ.
+- **Modern comparator style.** Prefer `Comparator.comparingInt(x -> x.field)` and `Integer.compare(a, b)` over `(a, b) -> a - b` to avoid overflow. Chain with `.thenComparing(...)` for tie-breakers.
+- **API stable through Java 24.** No behavioral changes since Java 8 beyond generic signature refinements; records and lambdas interoperate cleanly with the comparator API.
 - **Thread-safe alternative:** Use `PriorityBlockingQueue` if needed in concurrent code (rare in interviews).

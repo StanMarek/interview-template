@@ -65,6 +65,18 @@ Message-driven architecture is the **foundation** — it enables the other three
 - The team lacks reactive experience (steep learning curve, hard-to-debug stack traces)
 - Virtual threads (Java 21+) can solve your concurrency needs with a simpler model
 
+### The 2026 Landscape — Reactive and Virtual Threads Coexist
+
+By 2026, the industry consensus has shifted from "reactive vs virtual threads" (zero-sum) to **complementary concurrency models**. Key points senior engineers should know:
+
+- **Virtual threads (Java 21+)** made the thread-per-request model viable for massive blocking I/O concurrency, removing the main scalability argument for reactive in typical CRUD microservices.
+- **Reactive still dominates** for streaming, backpressure-sensitive pipelines, event-driven architectures, and fan-out orchestration where operator composition is more expressive than imperative coordination.
+- **Hybrid architectures are mainstream**: virtual threads handle most request-response endpoints while a reactive slice handles SSE, WebSockets, Kafka consumers, and reactive gateways.
+- **Reactor itself embraces Loom**: since Reactor 3.6, `Schedulers.boundedElastic()` has a virtual-thread-backed implementation (`reactor.schedulers.defaultBoundedElasticOnVirtualThreads=true`) — the two models actively cross-pollinate.
+- **Java 25 structured concurrency** (JEP 505, stable in 2025) and **scoped values** (replacement for `ThreadLocal` on virtual threads) give imperative code much of the composition and cancellation ergonomics that were previously reactive-only strengths.
+
+The senior-level answer to "reactive or virtual threads?" in 2026 is almost always "both, where each is strongest" — not a one-way migration.
+
 ---
 
 ## 2. Reactive Streams Specification
@@ -555,7 +567,71 @@ Flux.range(1, 1000)
 
 ---
 
-## 6. Spring WebFlux
+## 6. Schedulers and Threading Model
+
+Reactor is **concurrency-agnostic by default** — operators execute on the thread that invokes `onNext`. Explicit scheduler placement is needed to offload work, parallelize, or escape blocking calls.
+
+### Built-in Schedulers
+
+| Scheduler | Threads | Typical Size | Use Case |
+|-----------|---------|--------------|----------|
+| `Schedulers.parallel()` | Bounded, non-blocking | `Runtime.getRuntime().availableProcessors()` | Short CPU-bound work, non-blocking compute |
+| `Schedulers.boundedElastic()` | Bounded, elastic, blocking-safe | `10 * CPUs` workers, 100k queued tasks | Wrapping **blocking I/O** (JDBC, legacy clients) |
+| `Schedulers.single()` | 1 reusable thread | 1 | Low-latency one-off tasks, serialized work |
+| `Schedulers.immediate()` | Caller's thread | n/a | Composition, testing, "no hop" semantics |
+| `Schedulers.fromExecutor(exec)` | Whatever `exec` provides | Custom | Integrate existing `ExecutorService` (e.g., virtual threads) |
+
+Since Reactor 3.6, `boundedElastic()` can be switched to a **virtual-thread-per-task** implementation by setting the system property `reactor.schedulers.defaultBoundedElasticOnVirtualThreads=true` on Java 21+. This removes the thread cap (every blocking task runs on its own virtual thread) and is now the recommended setting when running WebFlux on Loom-capable JDKs.
+
+```java
+// Integrate virtual threads explicitly
+Scheduler vt = Schedulers.fromExecutor(Executors.newVirtualThreadPerTaskExecutor());
+
+Mono.fromCallable(() -> legacyJdbcCall())
+    .subscribeOn(vt)     // Blocking call hops to a virtual thread
+    .map(this::transform);
+```
+
+### publishOn vs subscribeOn
+
+This is a classic interview question. Both move work to a scheduler, but they act at different points in the chain.
+
+```java
+Flux.range(1, 5)                          // (A) thread where subscribe() is called
+    .map(i -> i * 2)                      // (B) same thread as (A) until a switch
+    .subscribeOn(Schedulers.parallel())   // Affects (A) + (B) — upstream subscription thread
+    .publishOn(Schedulers.boundedElastic())// Affects everything downstream of here
+    .filter(i -> i > 2)                   // Runs on boundedElastic
+    .subscribe();                         // Runs on boundedElastic
+```
+
+| Operator | When applied | Scope |
+|----------|-------------|-------|
+| `subscribeOn(S)` | Once, regardless of position | Source subscription + all upstream work, until the first `publishOn` |
+| `publishOn(S)` | At the position it appears | Everything downstream of that point |
+| Multiple `subscribeOn` | Only the **first** one encountered wins | n/a |
+| Multiple `publishOn` | Each one creates a new thread hop | Downstream changes scheduler each time |
+
+Rule of thumb: use `subscribeOn` to choose where the source runs (e.g., a blocking source on `boundedElastic`), and `publishOn` to change where downstream processing runs (e.g., CPU-bound transformation on `parallel`).
+
+### parallel() Flux — True Parallel Pipelines
+
+`Flux.parallel()` splits a flux into N rails that can be processed concurrently.
+
+```java
+Flux.range(1, 1_000_000)
+    .parallel(8)                         // 8 rails
+    .runOn(Schedulers.parallel())
+    .map(this::expensiveComputation)
+    .sequential()                        // Merge rails back into a single Flux
+    .subscribe();
+```
+
+Use `parallel()` only for **stateless CPU-bound** work — it bypasses per-operator ordering guarantees. For I/O fan-out, prefer `flatMap` with an explicit `concurrency` parameter, which is simpler and backpressure-aware.
+
+---
+
+## 7. Spring WebFlux
 
 Spring WebFlux is the reactive web framework in Spring, built on Project Reactor and Netty. It provides a non-blocking, event-loop-based alternative to Spring MVC.
 
@@ -785,16 +861,18 @@ public class ChatWebSocketHandler implements WebSocketHandler {
 | Server | Tomcat, Jetty (servlet) | Netty, Undertow (non-blocking) |
 | Threading | Thread-per-request | Event loop (few threads) |
 | Database access | JDBC, JPA (blocking) | R2DBC (non-blocking) |
-| Concurrency | Hundreds to low thousands | Tens of thousands |
-| Debugging | Standard stack traces | Complex, operator-heavy traces |
+| Concurrency (pre-Loom) | Hundreds to low thousands | Tens of thousands |
+| Concurrency (Java 21+ virtual threads) | 1,000,000+ | 1,000,000+ |
+| Debugging | Standard stack traces | Complex, operator-heavy traces (mitigated by `checkpoint`/`ReactorDebugAgent`) |
 | Learning curve | Low | High |
-| Streaming | Limited (chunked transfer) | Native (SSE, WebSocket, Flux) |
-| Ecosystem maturity | Extensive (JPA, Hibernate, etc.) | Growing (R2DBC, reactive Mongo, etc.) |
-| Virtual threads (Java 21+) | Excellent fit | Less necessary |
+| Streaming | Limited (chunked transfer, async Servlet) | Native (SSE, WebSocket, `Flux`) |
+| Ecosystem maturity | Extensive (JPA, Hibernate, all libraries) | Mature for Mongo/Redis/Kafka; R2DBC trails JPA in features |
+| Virtual threads (Java 21+) | Excellent fit | Not needed for scaling; can still be used on `boundedElastic` |
+| 2026 default for new services | Yes, unless streaming/backpressure needed | Only for streaming, gateway, event-driven edges |
 
 ---
 
-## 7. R2DBC — Reactive Database Access
+## 8. R2DBC — Reactive Database Access
 
 ### Why JDBC Is Blocking
 
@@ -969,7 +1047,7 @@ public class TransferService {
 
 ---
 
-## 8. Testing Reactive Code
+## 9. Testing Reactive Code
 
 ### StepVerifier — Asserting Signal Sequences
 
@@ -1155,11 +1233,130 @@ class OrderServiceTest {
 }
 ```
 
+### WebTestClient — Integration Testing for WebFlux
+
+```java
+@SpringBootTest
+@AutoConfigureWebTestClient
+class UserControllerIT {
+
+    @Autowired
+    private WebTestClient client;
+
+    @Test
+    void shouldReturnUser() {
+        client.get().uri("/api/users/42")
+            .exchange()
+            .expectStatus().isOk()
+            .expectHeader().contentType(MediaType.APPLICATION_JSON)
+            .expectBody(User.class)
+            .value(user -> assertThat(user.getName()).isEqualTo("alice"));
+    }
+
+    @Test
+    void shouldStreamEvents() {
+        client.get().uri("/stream/events")
+            .accept(MediaType.TEXT_EVENT_STREAM)
+            .exchange()
+            .expectStatus().isOk()
+            .returnResult(String.class)
+            .getResponseBody()
+            .take(3)
+            .as(StepVerifier::create)
+            .expectNextCount(3)
+            .thenCancel()
+            .verify();
+    }
+}
+```
+
 ---
 
-## 9. Virtual Threads vs Reactive
+## 10. Debugging Reactive Code
 
-Java 21 introduced virtual threads (Project Loom), which offer a fundamentally different approach to the same concurrency problem reactive programming solves.
+Reactive stack traces are notoriously unhelpful — the stack rarely shows where the chain was declared. Reactor provides tooling to recover locality.
+
+### Hooks.onOperatorDebug() — Global Debug Mode
+
+```java
+// Enable globally in tests or during development (expensive — do NOT ship to prod)
+Hooks.onOperatorDebug();
+
+Flux.range(1, 5)
+    .map(i -> i / (i - 3))   // ArithmeticException on i == 3
+    .subscribe();
+// Stack trace now includes the file/line where .map() was declared
+```
+
+This instruments every operator assembly with a captured stack trace. In production, prefer the zero-cost alternative:
+
+```java
+// Add reactor-tools to the classpath and call once at startup
+ReactorDebugAgent.init();
+```
+
+`ReactorDebugAgent` uses bytecode weaving (via Byte Buddy) to instrument operators at load time with negligible runtime cost, making it safe for production.
+
+### checkpoint() — Targeted Assembly Markers
+
+Rather than enabling global debug mode, drop `checkpoint()` calls at suspected failure points:
+
+```java
+userService.findById(id)
+    .checkpoint("after findById")
+    .flatMap(profileService::enrich)
+    .checkpoint("after enrich", true)   // true => force full stack trace
+    .flatMap(orderService::attachOrders)
+    .checkpoint("after attachOrders")
+    .subscribe();
+```
+
+When an error passes a checkpoint, Reactor appends the checkpoint description (and optionally the assembly stack) to the exception — pinpointing which stage failed without paying the global cost.
+
+### BlockHound — Catching Blocking Calls
+
+```java
+// Install once per JVM (typically in test @BeforeAll or main())
+BlockHound.install(
+    builder -> builder
+        .allowBlockingCallsInside("com.example.AllowedClass", "legacyMethod")
+);
+
+// Any blocking call (Thread.sleep, synchronized wait, JDBC) on
+// a non-blocking thread (reactor-http-nio-*, parallel-*) throws
+// BlockingOperationError with the stack trace pinned to the culprit.
+```
+
+### Reactor Debug Output
+
+```java
+Flux.range(1, 3)
+    .log("app.range")          // Logs all Reactive Streams signals at INFO
+    .map(i -> i * 2)
+    .log("app.mapped")
+    .subscribe();
+// Output shows onSubscribe, request, onNext, onComplete for each stage
+```
+
+### Context Propagation Integration (Reactor 3.5+ / Micrometer)
+
+Reactor integrates with the `io.micrometer:context-propagation` library to bridge Reactor `Context` and `ThreadLocal` values automatically. This is how Spring Cloud Sleuth, OpenTelemetry, and MDC logging now flow through reactive chains without manual plumbing.
+
+```java
+// In Spring Boot 3.2+ this is auto-enabled. Manual setup:
+Hooks.enableAutomaticContextPropagation();
+
+// Now ThreadLocal-based APIs (MDC, Span contexts) are restored
+// around reactive operator boundaries, keyed by ContextAccessor SPI.
+```
+
+Note: Reactor 3.7 removed automatic `ThreadLocal` restoration inside `handle`/`tap` operators — instead, wrap the target callback with `ContextSnapshot.wrap(...)` explicitly when restoration is needed there.
+
+---
+
+## 11. Virtual Threads vs Reactive
+
+Java 21 introduced virtual threads (Project Loom), which offer a fundamentally different approach to the same concurrency problem reactive programming solves. By 2026 (Java 25 LTS era), the landscape has settled into a **complementary** model — not a winner-takes-all migration.
 
 ### Thread-Per-Request with Virtual Threads
 
@@ -1199,17 +1396,20 @@ When a virtual thread encounters a blocking I/O operation, it **unmounts** from 
 | **Debugging** | Standard stack traces | Standard stack traces | Complex operator traces |
 | **Backpressure** | Manual | Manual | Built-in |
 | **Streaming** | Awkward | Awkward | Native |
-| **ThreadLocal** | Works | Works | Broken (use Context) |
+| **ThreadLocal** | Works | Works (scoped values preferred on Loom) | Broken (use Context / Micrometer propagation) |
 | **Ecosystem** | JDBC, JPA, all libraries | JDBC, JPA, all libraries | R2DBC, reactive-only libs |
-| **Error handling** | try-catch | try-catch | Operator chains |
+| **Error handling** | try-catch | try-catch / StructuredTaskScope | Operator chains |
 | **CPU-bound work** | Carrier thread bound | Carrier thread bound | Scheduler-dependent |
+| **Pinning risk** | n/a | `synchronized`, `native` pin carrier (largely mitigated by JEP 491 in JDK 24+) | n/a |
+| **Structured concurrency** | Manual executors | `StructuredTaskScope` (stable in Java 25) | Operator composition |
 
-### When Virtual Threads Make Reactive Unnecessary
+### When Virtual Threads Are the Better Default
 
 - Standard request-response microservices with blocking I/O (JDBC, JPA, REST calls)
-- Teams without reactive experience — virtual threads preserve familiar imperative code
+- Teams without reactive experience — virtual threads preserve familiar imperative code, debuggers, and profilers
 - Applications where backpressure and streaming are not requirements
-- Brownfield projects with existing blocking codebases — virtual threads require zero refactoring
+- Brownfield projects with existing blocking codebases — virtual threads require close to zero refactoring
+- CRUD services where the 2026 data shows migration from WebFlux delivers ~35% LOC reduction and dramatic debugging-time improvements
 
 ### When Reactive Still Wins
 
@@ -1246,18 +1446,95 @@ public class HybridConfig {
 
 ### Migration Path from Reactive to Virtual Threads
 
-1. **Upgrade to Java 21+** and Spring Boot 3.2+
+Only migrate when the business case is clear — code reduction, onboarding cost, observability gaps. The 2026 playbook:
+
+1. **Upgrade to Java 21+ (ideally Java 25 LTS)** and Spring Boot 3.4+
 2. **Enable virtual threads**: `spring.threads.virtual.enabled=true`
-3. **Replace WebFlux controllers** with Spring MVC controllers one endpoint at a time
-4. **Replace R2DBC** with JDBC/JPA (or keep R2DBC if it works well)
-5. **Replace `WebClient`** with `RestClient` (blocking) where reactive composition is not needed
-6. **Keep reactive for streaming endpoints** — SSE, WebSocket, Kafka consumers
-7. **Remove `Mono`/`Flux`** wrappers around simple request-response flows
-8. **Test thoroughly** — virtual threads have different characteristics with `synchronized` blocks and `native` methods (they pin the carrier thread)
+3. **Audit for pinning**: scan for `synchronized` on I/O paths — JEP 491 (JDK 24) removed most pinning cases, but older JDKs or `native` methods still pin
+4. **Move CRUD controllers** from WebFlux to Spring MVC one endpoint at a time; benchmark each
+5. **Replace R2DBC with JDBC/JPA** only if reactive DB semantics are not needed; keep R2DBC for streaming reads
+6. **Replace `WebClient` with `RestClient`** (blocking, introduced in Spring 6.1) where reactive composition is not needed
+7. **Keep reactive for streaming endpoints** — SSE, WebSocket, Kafka consumers, high-concurrency gateways with backpressure
+8. **Replace `ThreadLocal` with `ScopedValue`** on virtual threads (more memory-efficient, better cancellation semantics)
+9. **Adopt `StructuredTaskScope`** for fan-out work instead of ad-hoc `CompletableFuture` combinators
+10. **Test thoroughly** — virtual threads behave differently with pinning, profilers (JFR events), and thread dumps
 
 ---
 
-## 10. Common Pitfalls
+## 12. Reactive Ecosystem — Beyond Reactor
+
+A senior engineer should be able to compare Reactor with the other mainstream reactive-or-reactive-like stacks. All of these implement (or interoperate with) the Reactive Streams specification except Kotlin Flow, which uses a different but structurally similar contract.
+
+### RxJava 3
+
+RxJava is the JVM port of Microsoft's Reactive Extensions and pre-dates Reactor. RxJava 3 is API-cleaned (distinct `Observable` vs `Flowable`) but has plateaued in adoption on the server. It still dominates Android.
+
+| Aspect | RxJava 3 | Project Reactor 3 |
+|--------|----------|-------------------|
+| Core types | `Observable` (no backpressure), `Flowable` (backpressure), `Single`, `Maybe`, `Completable` | `Flux` (0..N, backpressure), `Mono` (0..1) |
+| Null values | Disallowed (throws) | Disallowed (throws) |
+| Default threading | Operators can hop threads (some schedule by default) | Single-threaded by default; explicit `publishOn`/`subscribeOn` |
+| Checked exceptions | Functional interfaces allow checked | Standard `java.util.function` — awkward for checked |
+| Primary audience | Android, cross-platform Rx users | JVM server-side, Spring |
+| Interop with Reactive Streams | Adapters via `RxJava3Adapter` | Native (`Publisher` compatible) |
+
+Key operator naming differences: `flatMap` (both), `concatMap` (both), `switchMap` (both), but RxJava uses `onErrorResumeNext` vs Reactor's `onErrorResume`; RxJava 3 uses `Flowable.fromCallable` vs `Mono.fromCallable`.
+
+### SmallRye Mutiny (Quarkus)
+
+Mutiny is Red Hat's reactive library, built for Quarkus and Vert.x. Designed around readability and a navigable fluent API that makes operator discovery easier than Reactor.
+
+```java
+// Mutiny chooses an event-verb style rather than operator chaining
+Uni<User> user = userService.findById(id);
+
+Uni<UserDTO> dto = user
+    .onItem().transform(this::toDto)                   // map
+    .onFailure(TimeoutException.class)
+        .recoverWithItem(UserDTO.DEFAULT)              // onErrorReturn for timeouts
+    .ifNoItem().after(Duration.ofSeconds(2)).fail();   // timeout
+```
+
+| Aspect | Mutiny | Reactor |
+|--------|--------|---------|
+| Core types | `Uni<T>` (0 or 1), `Multi<T>` (0..N) | `Mono<T>`, `Flux<T>` |
+| API style | Event-group navigation (`onItem()`, `onFailure()`, `onCancellation()`) | Flat operator chain |
+| Backpressure | Multi supports it; Uni does not need it | Flux supports it; Mono does not need it |
+| Discoverability | High — IDE guides you through event groups | Lower — ~400 operators on Flux |
+| Kotlin coroutines | First-class `awaitSuspending` / `asFlow` in `mutiny-kotlin` | `kotlinx-coroutines-reactor` adapter |
+| Primary stack | Quarkus, Vert.x | Spring WebFlux |
+
+Mutiny is Reactive Streams-compatible, so you can bridge Mutiny and Reactor types via adapters when needed.
+
+### Kotlin Coroutines and `Flow`
+
+In a Kotlin codebase, `suspend` functions + `Flow` offer an **imperative-looking** reactive model. Coroutines map cleanly to Reactor:
+
+| Reactor | Kotlin Coroutines |
+|---------|-------------------|
+| `Mono<T>` | `suspend fun(): T` (or `Deferred<T>`) |
+| `Flux<T>` | `Flow<T>` |
+| `Mono.empty()` | `suspend fun(): T?` returning null |
+| `flatMap` | `flatMapMerge` / `flatMapConcat` |
+| `concatMap` | `flatMapConcat` |
+| `switchMap` | `flatMapLatest` |
+| `publishOn(scheduler)` | `flowOn(dispatcher)` |
+| `Context` | `CoroutineContext` |
+| Backpressure | Suspension (natural to coroutines) |
+
+Spring WebFlux controllers can return `Flow` and `suspend` directly on Kotlin — `kotlinx-coroutines-reactor` bridges the two models. In 2026, Kotlin + coroutines is the most common way new greenfield reactive-ish services are written when the team uses Kotlin.
+
+### When to Pick Which
+
+- **Spring + Java**: Reactor (default, deepest integration)
+- **Quarkus**: Mutiny (Quarkus is built on it; Reactor feels second-class)
+- **Android**: RxJava 3 (or Kotlin Flow if Kotlin-only)
+- **Kotlin everywhere**: Coroutines + Flow — imperative ergonomics, native language support
+- **Multi-stack / library code**: target the `Publisher` interface from `org.reactivestreams` and interop via adapters
+
+---
+
+## 13. Common Pitfalls
 
 ### 1. Blocking Calls in Reactive Chains
 
@@ -1407,7 +1684,7 @@ replaySink.asFlux().subscribe(System.out::println);  // Prints event-1, event-2
 
 ---
 
-## 11. Common Senior Interview Questions
+## 14. Common Senior Interview Questions
 
 **Q1: What is backpressure, and why is it important in reactive systems?**
 
@@ -1510,22 +1787,24 @@ Since Java 9, these interfaces are mirrored in `java.util.concurrent.Flow`, maki
 
 ---
 
-**Q9: When would you choose reactive programming over virtual threads in a new Java 21+ project?**
+**Q9: When would you choose reactive programming over virtual threads in a new Java 21+/25 project?**
+
+By 2026 this is no longer a zero-sum choice. Virtual threads (Java 21+, stabilized with JEP 491 pinning fixes in JDK 24) remove the original scalability argument for reactive in most CRUD microservices. The new decision matrix:
 
 Choose reactive when:
-- The application involves streaming data (SSE, WebSockets, event feeds) where `Flux` naturally models the domain
-- Backpressure is a core requirement (e.g., consuming from a fast Kafka topic, rate-limited APIs)
-- Complex event composition is needed (`merge`, `zip`, `switchMap`, `combineLatest`)
-- The team has reactive experience and the ecosystem is already reactive (reactive MongoDB, R2DBC, reactive Redis)
+- The application involves streaming data (SSE, WebSockets, infinite event feeds) where `Flux` naturally models the domain
+- Backpressure is a core requirement (fast Kafka topic, rate-limited APIs, slow consumers). Virtual threads have no built-in backpressure — you have to add semaphores or queues by hand.
+- Complex event composition is needed (`merge`, `zip`, `switchMap`, `combineLatest`) — reactive operators are more expressive than manually coordinating structured tasks.
+- The team has reactive experience and the ecosystem is already reactive (reactive MongoDB, R2DBC, reactive Kafka).
 
 Choose virtual threads when:
 - Standard request-response microservices (most CRUD applications)
-- The team prefers imperative, debuggable code with familiar stack traces
+- The team prefers imperative, debuggable code with familiar stack traces and standard profilers
 - The application uses blocking libraries (JDBC, JPA, synchronous HTTP clients)
 - Backpressure and streaming are not requirements
 - Migrating a legacy blocking application to handle higher concurrency
 
-In practice, many organizations adopt a hybrid approach: virtual threads for most endpoints, reactive for streaming and event-driven features. The key insight is that virtual threads and reactive solve the same scalability problem through different means — virtual threads make blocking cheap, while reactive avoids blocking entirely.
+The 2026 default is virtual threads + Spring MVC for new greenfield CRUD services, with a reactive slice reserved for streaming and event-driven edges. Reactor itself now has a virtual-thread-backed `boundedElastic` scheduler (`reactor.schedulers.defaultBoundedElasticOnVirtualThreads=true`), showing the two models actively cross-pollinate rather than compete.
 
 ---
 
@@ -1540,3 +1819,39 @@ Testing reactive code requires specialized tools because assertions must validat
 - **`BlockHound`**: Install in test setup to catch accidental blocking calls.
 
 Best practices: test both happy path and error paths, use `assertNext` with AssertJ for complex assertions, set timeouts on `verify()` to prevent tests from hanging, and decompose complex chains into testable methods.
+
+---
+
+**Q11: Explain the difference between `subscribeOn` and `publishOn`. What is the effect of placement and multiple calls?**
+
+Both operators switch the thread used by the chain, but they differ in scope and position-sensitivity:
+
+- `subscribeOn(S)` affects the **subscription signal** direction (bottom-up). It controls the thread that runs the source and any upstream work, up until the first `publishOn`. Only the *first* `subscribeOn` encountered in the chain takes effect — subsequent ones are ignored. Position in the chain is irrelevant.
+- `publishOn(S)` is position-sensitive and affects everything **downstream** of it. Each new `publishOn` creates a new thread hop for the operators below it.
+
+Typical pattern: `subscribeOn(boundedElastic())` to run a blocking source off the event loop, then `publishOn(parallel())` before a CPU-bound map stage. In WebFlux request handlers, you rarely need `subscribeOn` — the source (WebClient, R2DBC) is already non-blocking and runs on the Netty event loop.
+
+---
+
+**Q12: How do you debug a reactive pipeline when stack traces are unhelpful?**
+
+Reactor provides three mechanisms at different cost/convenience tradeoffs:
+
+- **`Hooks.onOperatorDebug()`**: Instruments every operator with an assembly stack trace. Expensive — enable only in development/tests. Gives the best insight but noticeable runtime cost.
+- **`ReactorDebugAgent.init()`** (from `reactor-tools`): Bytecode-weaving alternative to `Hooks.onOperatorDebug()` that is safe for production. Same insight, negligible cost.
+- **`checkpoint("description")`**: Targeted markers inside specific chains. When an error passes through, the description is appended to the exception. Zero cost when no error occurs.
+
+For blocking-call detection, **BlockHound** (installed as a JVM agent) throws `BlockingOperationError` whenever a blocking call (`Thread.sleep`, JDBC, synchronized wait) runs on a non-blocking thread like `reactor-http-nio-*`. For signal-level introspection, `.log("tag")` logs every Reactive Streams signal (`onSubscribe`, `request`, `onNext`, `onComplete`, `cancel`).
+
+---
+
+**Q13: Compare Project Reactor, RxJava 3, Mutiny, and Kotlin Flow. When would you choose each?**
+
+All four implement asynchronous stream processing, but they target different ecosystems:
+
+- **Project Reactor**: JVM server-side default, deeply integrated with Spring WebFlux. `Mono`/`Flux`, flat operator API, Reactive Streams-native. Best for Spring-based services.
+- **RxJava 3**: Older, richer operator set, Rx-family consistency across languages. `Observable` (no backpressure) / `Flowable` (backpressure). Dominant on Android; on the server, Reactor has largely replaced it.
+- **SmallRye Mutiny**: Quarkus-native. `Uni` (0..1) and `Multi` (0..N) with an event-group API (`.onItem()`, `.onFailure()`) that is more discoverable than a flat chain. Interop with Reactive Streams for bridging.
+- **Kotlin Flow + coroutines**: Imperative `suspend` functions and `Flow<T>` that compile to reactive-equivalent code. Spring WebFlux handlers can return `Flow` and `suspend` directly via `kotlinx-coroutines-reactor`. In Kotlin codebases, this is now the default.
+
+Interop: all four can bridge via `Publisher<T>` from `org.reactivestreams`, so library code should target that interface.

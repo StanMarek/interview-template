@@ -1,5 +1,7 @@
 # Spring Framework — Senior Engineer Interview Preparation
 
+> **Baseline (April 2026)**: Spring Framework 6.2.x, Spring Boot 3.5.x, Spring Security 6.5.x, Spring Data 2025.x, Java 17 minimum (Java 21 recommended for virtual threads). `jakarta.*` replaces `javax.*` throughout Spring 6 / Boot 3. Spring Framework 7.0 and Spring Boot 4 are in milestone/RC; production targets remain 6.2 / 3.5.
+
 ---
 
 ## 1. Spring Core / IoC Container
@@ -83,7 +85,24 @@ public class PrototypeBean { }
 2. If multiple candidates → match by qualifier (`@Qualifier`)
 3. If still ambiguous → match by bean name (field/parameter name)
 4. If still ambiguous → `@Primary` bean wins
-5. Otherwise → `NoUniqueBeanDefinitionException`
+5. If all but one candidate are `@Fallback` (Spring 6.2+) → the non-fallback bean wins
+6. Otherwise → `NoUniqueBeanDefinitionException`
+
+### Spring 6.2 Bean Features
+
+```java
+// @Fallback — inverse of @Primary. Mark a default/stub that loses to any real candidate.
+@Bean @Fallback
+MyService stubMyService() { return new StubMyService(); }
+
+// Background bean initialization — reduces startup time for slow singletons.
+// Dependent beans with non-lazy injection points auto-wait. Combine with @Lazy
+// to allow completion at first access.
+@Bean(bootstrap = Bean.Bootstrap.BACKGROUND)
+MyExpensiveComponent myComponent() { ... }
+```
+
+Also new in 6.2: `@Reflective` / `@RegisterReflection` / `@ReflectionScan` for ergonomic native-image hint registration, and observation instrumentation is now applied to `@Scheduled` methods.
 
 ---
 
@@ -229,6 +248,12 @@ public List<User> findAll() {
 }
 ```
 
+### Reactive Transactions & Virtual Threads
+
+- **Reactive**: use `@Transactional` with `R2dbcTransactionManager` (reactive propagation) — JPA/JDBC are blocking and not compatible.
+- **Virtual threads**: `@Transactional` is fully compatible. JDBC connection pools (HikariCP) are the main bottleneck since they're still platform-thread-sized. Keep `pool-size <= db_max_connections` to avoid pinning.
+- **`TransactionalOperator`** (programmatic reactive): use for fine-grained boundaries inside reactor chains where `@Transactional` wrapping is too coarse.
+
 ---
 
 ## 4. Spring Boot Auto-Configuration
@@ -282,23 +307,310 @@ public record MailProperties(
 
 **Property Sources (priority order)**: Command-line args > `SPRING_APPLICATION_JSON` > OS env vars > application-{profile}.yml > application.yml > `@PropertySource` > defaults.
 
+### Notable Boot 3.3–3.5 Changes
+
+| Area | Change |
+|------|--------|
+| `spring.factories` | Deprecated for auto-config; use `META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports` |
+| Restructured `spring-boot` modules | 3.5 split many starters into narrower modules; `spring-boot-parent` is no longer published |
+| SSL bundles | `spring.ssl.bundle.*` centralized keystore/truststore config, reusable across WebClient, RestClient, Kafka, Redis, DataSource |
+| Profile naming | 3.5 restricts profile names to `[A-Za-z0-9_-]`, may not start/end with `-`/`_` |
+| Heap-dump actuator | `access=NONE` by default in 3.5 |
+| OpenTelemetry | `OTEL_SERVICE_NAME` / `OTEL_RESOURCE_ATTRIBUTES` honored natively |
+| Docker Compose & Testcontainers | First-class integration (`@ServiceConnection`, `spring.docker.compose.*`) |
+
 ---
 
-## 5. Spring Security
+## 5. HTTP Clients (RestClient, WebClient, HTTP Interface)
+
+Since Spring Framework 6.1, `RestTemplate` is **in maintenance mode**. Prefer one of:
+
+| Client | Style | Needs WebFlux? | Use When |
+|--------|-------|----------------|----------|
+| `RestClient` | Synchronous, fluent | No | New synchronous code; drop-in upgrade from `RestTemplate` |
+| `WebClient` | Reactive (Mono/Flux) | Yes (`spring-webflux`) | Reactive pipelines, streaming, high-concurrency |
+| `@HttpExchange` interface | Declarative | No (RestClient adapter) | Typed client-as-interface, like Feign |
+| `RestTemplate` | Synchronous | No | Legacy code only |
+
+### RestClient (Spring 6.1+)
+
+```java
+@Bean
+RestClient restClient(RestClient.Builder builder) {
+    return builder
+        .baseUrl("https://api.example.com")
+        .defaultHeader(HttpHeaders.ACCEPT, MediaType.APPLICATION_JSON_VALUE)
+        .requestInterceptor(new BearerTokenInterceptor())
+        .build();
+}
+
+// Usage — same fluent API as WebClient, but synchronous
+User user = restClient.get()
+    .uri("/users/{id}", id)
+    .retrieve()
+    .onStatus(HttpStatusCode::is4xxClientError, (req, res) -> {
+        throw new NotFoundException();
+    })
+    .body(User.class);
+
+// Boot 3.4+ auto-configures a RestClient.Builder with Micrometer observation + SSL bundles.
+```
+
+**Gotcha (Spring 6.2)**: `retrieve()` without a terminal operation used to fire the request. It is now a **no-op**; you must call `.body(...)`, `.toEntity(...)`, or `.toBodilessEntity()`.
+
+### Declarative `@HttpExchange` Clients
+
+```java
+public interface GitHubClient {
+    @GetExchange("/repos/{owner}/{repo}")
+    Repo getRepo(@PathVariable String owner, @PathVariable String repo);
+
+    @PostExchange("/repos/{owner}/{repo}/issues")
+    Issue createIssue(@PathVariable String owner, @PathVariable String repo,
+                      @RequestBody CreateIssue body);
+}
+
+@Bean
+GitHubClient gitHubClient(RestClient restClient) {
+    RestClientAdapter adapter = RestClientAdapter.create(restClient);
+    return HttpServiceProxyFactory.builderFor(adapter).build()
+        .createClient(GitHubClient.class);
+}
+```
+
+Replaces most Feign use-cases without adding Spring Cloud. Works with both `RestClient` (sync) and `WebClient` (reactive) adapters.
+
+### WebClient Timeouts & Resiliency
+
+```java
+WebClient.builder()
+    .clientConnector(new ReactorClientHttpConnector(
+        HttpClient.create()
+            .responseTimeout(Duration.ofSeconds(5))
+            .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 2_000)
+    ))
+    .defaultStatusHandler(HttpStatusCode::is5xxServerError,
+        res -> res.bodyToMono(String.class)
+            .map(body -> new UpstreamException(body)))
+    .build();
+```
+
+---
+
+## 6. Virtual Threads & Project Loom Integration
+
+Spring Boot 3.2+ added Loom support; 3.4/3.5 expanded it to MVC async, `@Async`, schedulers, messaging listeners, and HTTP clients.
+
+### Enable
+
+```yaml
+spring:
+  threads:
+    virtual:
+      enabled: true   # Requires Java 21+
+```
+
+When enabled, Boot wires virtual threads into:
+- Tomcat request processing (one VT per request)
+- `@Async` executor (`SimpleAsyncTaskExecutor` in virtual-thread mode)
+- Spring MVC async request processing (`AsyncTaskExecutor`)
+- Scheduled tasks (`TaskScheduler`)
+- Kafka / RabbitMQ / JMS listener containers
+
+### Pitfalls (senior-level)
+
+| Pitfall | Why |
+|---------|-----|
+| **Pinning on `synchronized`** | A VT holding a monitor cannot unmount → throughput collapses. Use `ReentrantLock` for contended critical sections. (Fixed in JDK 24 via JEP 491, still relevant on 21.) |
+| **ThreadLocal memory blowup** | Millions of VTs × ThreadLocals = heap pressure. Use **Scoped Values** (finalized in JDK 25, JEP 506) or explicit context propagation. |
+| **JDBC connection pools** | HikariCP default (10) becomes the concurrency ceiling. Size pool for DB limits, use VTs for request threads only. |
+| **Not a speedup for CPU-bound code** | VTs help I/O-bound workloads. CPU-bound code still needs `ForkJoinPool`. |
+
+> For canonical version-status of every Loom-adjacent feature, see [`11-java-versions-evolution.md`](11-java-versions-evolution.md) — do not duplicate JEP numbers here, they drift.
+
+### Structured Concurrency (still preview through JDK 25, JEP 505 — 5th preview)
+
+```java
+try (var scope = new StructuredTaskScope.ShutdownOnFailure()) {
+    Subtask<User> user = scope.fork(() -> userClient.get(id));
+    Subtask<List<Order>> orders = scope.fork(() -> orderClient.list(id));
+    scope.join().throwIfFailed();
+    return new Dashboard(user.get(), orders.get());
+}
+```
+
+Useful for fan-out calls inside a controller; cancellation is propagated if any subtask fails.
+
+---
+
+## 7. Observability (Micrometer, @Observed, Tracing)
+
+Spring Boot 3 replaced Spring Cloud Sleuth with **Micrometer Observation** + **Micrometer Tracing** (Brave/OTel bridge).
+
+```java
+// Declarative observation
+@Observed(name = "order.process", contextualName = "process-order",
+          lowCardinalityKeyValues = {"tier", "premium"})
+public Order process(Long id) { ... }
+
+// Programmatic
+Observation.createNotStarted("checkout", registry)
+    .lowCardinalityKeyValue("region", "eu")
+    .observe(() -> doCheckout());
+```
+
+Each `Observation` emits metrics, a tracing span, and log correlation automatically.
+
+**Boot 3.5 specifics**:
+- Honors `OTEL_SERVICE_NAME` / `OTEL_RESOURCE_ATTRIBUTES`
+- `management.tracing.sampling.probability` controls sampling
+- `spring-boot-starter-actuator` + `micrometer-registry-prometheus` + `micrometer-tracing-bridge-otel` is the standard trio
+- `@Scheduled` methods get automatic observation in Spring 6.2
+
+---
+
+## 8. Problem Details (RFC 7807)
+
+Standardized error responses in Spring 6 / Boot 3. `ProblemDetail` + `ErrorResponse` replace ad-hoc error DTOs.
+
+```java
+@RestControllerAdvice
+public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
+
+    @ExceptionHandler(ProductNotFoundException.class)
+    ProblemDetail handleNotFound(ProductNotFoundException ex) {
+        ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
+        pd.setType(URI.create("https://api.example.com/errors/product-not-found"));
+        pd.setTitle("Product not found");
+        pd.setProperty("productId", ex.getProductId());
+        pd.setProperty("timestamp", Instant.now());
+        return pd;
+    }
+}
+
+// Or throw an ErrorResponseException for status + message in one step
+throw new ErrorResponseException(HttpStatus.CONFLICT,
+    ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, "Duplicate SKU"), null);
+```
+
+Enable globally:
+```yaml
+spring:
+  mvc:
+    problemdetails:
+      enabled: true   # Also spring.webflux.problemdetails.enabled for WebFlux
+```
+
+Response is `application/problem+json`:
+```json
+{ "type": "...", "title": "...", "status": 404, "detail": "...", "instance": "/api/products/42" }
+```
+
+---
+
+## 9. AOT & GraalVM Native Image
+
+Spring Boot 3 ships an AOT engine: `@Configuration` classes, bean definitions, property bindings, and proxy chains are analyzed at **build time** and generated as source code + reachability metadata consumable by GraalVM `native-image`.
+
+### Build
+
+```bash
+# Maven
+mvn -Pnative native:compile
+# Gradle
+./gradlew nativeCompile
+```
+
+Outputs a native executable — typical Spring Boot app starts in ~50ms, ~100MB RSS (vs ~1s / ~300MB on JVM).
+
+### Programming Constraints
+
+| Constraint | Consequence |
+|------------|-------------|
+| Classpath is fixed at build time | No runtime classpath scanning; `@Profile` is evaluated in a "build profile" pass then frozen |
+| Reflection needs hints | Use `@RegisterReflectionForBinding`, `@Reflective` (Spring 6.2), or `reachability-metadata.json` |
+| No runtime bytecode generation | CGLIB proxies, dynamic `@Configuration` subclassing pre-generated via AOT |
+| Conditional beans frozen | `@ConditionalOnProperty` evaluated at build time by default (use `spring.profiles.active` at build) |
+
+### When to Use
+
+Good for: FaaS (Lambda/Cloud Run), CLI tools, short-lived containers, tight scaling windows.
+Bad for: JIT-heavy throughput workloads (C2 ultimately beats AOT on long-running services), dynamic plugin architectures.
+
+### CDS (Class Data Sharing) Alternative
+
+Spring Boot 3.3+ supports AppCDS training runs — `-XX:ArchiveClassesAtExit=app.jsa` — giving ~30–50% faster JVM startup with no native-image tradeoffs. Often the pragmatic middle ground.
+
+---
+
+## 10. Spring Modulith
+
+A modular-monolith framework for organizing a Spring Boot app into **application modules** with enforced boundaries, event-driven communication, integration testing, and architecture documentation.
+
+```
+com.acme.shop
+├── order          ← module (public API)
+│   ├── Order.java
+│   └── internal   ← internal package (not visible to other modules)
+├── inventory
+└── billing
+```
+
+### Core Features
+
+```java
+// 1. Module-aware event listening (runs in a separate transaction, async-capable)
+@Component
+class OrderNotifier {
+    @ApplicationModuleListener
+    void on(OrderPlaced event) { /* ... */ }
+}
+
+// 2. Architecture tests — fail build if modules depend on each other's internals
+@Test void verifiesModuleStructure() {
+    ApplicationModules.of(ShopApplication.class).verify();
+}
+
+// 3. Integration test a single module
+@ApplicationModuleTest
+class OrderModuleTests {
+    @Autowired Orders orders;
+    @Test void publishesEvent(Scenario scenario) {
+        scenario.stimulate(() -> orders.place(new Order()))
+                .andWaitForEventOfType(OrderPlaced.class)
+                .toArriveAndVerify(evt -> assertThat(evt.orderId()).isNotNull());
+    }
+}
+```
+
+### Event Publication Registry
+
+Solves "what happens if the listener fails after the transaction commits?" — events are persisted in a `event_publication` table inside the same transaction as the domain change (transactional outbox pattern). A re-publisher retries failed listeners on restart.
+
+**Status (April 2026)**: Modulith 1.4.x (GA for Boot 3.5), 2.0 M1 tracks Spring Boot 4 / Framework 7, 2.1 M4 adds JobRunr-backed event externalization. A common senior question: "when would you reach for Modulith vs microservices?" — answer: Modulith when the bounded contexts are real but you don't yet need independent deployability, scaling, or heterogeneous data stores.
+
+---
+
+## 11. Spring Security
 
 ### Security Filter Chain
 
-Spring Security inserts a `FilterChainProxy` (DelegatingFilterProxy) into the servlet filter chain. Internally it maintains an ordered list of security filters:
+Spring Security inserts a `FilterChainProxy` (via `DelegatingFilterProxy`) into the servlet filter chain. Internally it maintains an ordered list of security filters:
 
 ```
-Request → SecurityContextPersistenceFilter
+Request → DisableEncodeUrlFilter
+        → WebAsyncManagerIntegrationFilter
+        → SecurityContextHolderFilter        (Security 6 replaced SecurityContextPersistenceFilter)
+        → HeaderWriterFilter
         → CsrfFilter
         → LogoutFilter
-        → UsernamePasswordAuthenticationFilter / OAuth2LoginAuthenticationFilter
+        → UsernamePasswordAuthenticationFilter / OAuth2LoginAuthenticationFilter / BearerTokenAuthenticationFilter
         → ExceptionTranslationFilter
-        → FilterSecurityInterceptor (authorization)
+        → AuthorizationFilter                 (Security 6 replaced FilterSecurityInterceptor)
         → Controller
 ```
+
+Key 6.x shifts vs 5.x: `authorizeRequests()` → `authorizeHttpRequests()`, `antMatchers()` → `requestMatchers()`, `FilterSecurityInterceptor` → `AuthorizationFilter` backed by `AuthorizationManager`, `SecurityContextPersistenceFilter` → `SecurityContextHolderFilter` (lazier session read).
 
 ### Modern Configuration (Spring Security 6+)
 
@@ -336,7 +648,10 @@ public class SecurityConfig {
 4. Success → `SecurityContextHolder.getContext().setAuthentication(auth)`
 5. `SecurityContext` stored in `ThreadLocal` (or propagated for async)
 
-**Risk**: `SecurityContext` is ThreadLocal-based. In async/reactive code, it's not propagated automatically. Use `SecurityContextHolder.setStrategyName(MODE_INHERITABLETHREADLOCAL)` or Reactor's Context.
+**Risk**: `SecurityContext` is ThreadLocal-based. In async/reactive code, it's not propagated automatically.
+- **Servlet async / `@Async`**: `DelegatingSecurityContextRunnable` or configure `MODE_INHERITABLETHREADLOCAL`.
+- **Reactive**: `ReactiveSecurityContextHolder` reads from the Reactor `Context`.
+- **Virtual threads**: ThreadLocal works per-request VT, but shared executors need `DelegatingSecurityContextExecutor` to copy context.
 
 ### JWT Token Validation
 
@@ -357,7 +672,7 @@ public JwtDecoder jwtDecoder() {
 
 ---
 
-## 6. Spring Data JPA
+## 12. Spring Data JPA
 
 ### N+1 Problem
 
@@ -436,16 +751,18 @@ public abstract class Auditable {
 
 ---
 
-## 7. Spring WebFlux (Reactive)
+## 13. Spring WebFlux (Reactive)
 
 ### When to Use Reactive vs Servlet
 
-| Use Reactive When | Use Servlet (MVC) When |
-|-------------------|----------------------|
-| High concurrency, I/O-bound workloads | CPU-bound processing |
-| Streaming data (SSE, WebSocket) | JDBC/JPA (blocking by nature) |
-| Gateway/proxy services | Team unfamiliar with reactive |
-| Microservice orchestration | Simpler debugging needed |
+With **virtual threads** (Java 21+, Boot 3.2+), the "high concurrency, I/O-bound" argument for WebFlux is weaker — a synchronous MVC app on VTs can scale to tens of thousands of concurrent requests. Reactive's remaining strengths are streaming semantics and backpressure.
+
+| Use Reactive When | Use Servlet MVC (+ virtual threads) When |
+|-------------------|------------------------------------------|
+| Streaming data (SSE, WebSocket, chunked transfer) | JDBC/JPA or any blocking driver dominates |
+| Explicit backpressure needed (slow consumer) | Team unfamiliar with reactive |
+| Compose many async upstream calls with operators | Simpler debugging needed |
+| Reactive DB (R2DBC, Mongo Reactive) end-to-end | Existing synchronous code — VTs give most of the throughput win |
 
 ### Key Concepts
 
@@ -476,11 +793,12 @@ Flux.range(1, 1000)
 **Common Pitfalls**:
 - **Blocking in reactive pipeline**: Calling `.block()`, Thread.sleep(), JDBC in a reactive chain blocks the event loop → use `Schedulers.boundedElastic()` for wrapping blocking calls
 - **Nothing happens without subscribe**: Reactive streams are lazy; if nobody subscribes, the pipeline never executes
-- **Context propagation**: MDC, SecurityContext, Transaction context don't propagate automatically in reactive chains
+- **Context propagation**: MDC, SecurityContext, Transaction context don't propagate automatically — use `io.micrometer:context-propagation` (Spring Boot 3+) with `Hooks.enableAutomaticContextPropagation()` so `ThreadLocal`s are captured into Reactor `Context` transparently
+- **Reactor `BlockHound`**: test-scope dependency that detects blocking calls in non-blocking schedulers — invaluable for catching regressions
 
 ---
 
-## 8. Testing in Spring
+## 14. Testing in Spring
 
 ```java
 // Slice tests — load only relevant auto-configuration
@@ -514,7 +832,7 @@ class OrderServiceIntegrationTest {
 @WebMvcTest(OrderController.class)
 class OrderControllerTest {
     @Autowired MockMvc mockMvc;
-    @MockBean OrderService orderService;
+    @MockitoBean OrderService orderService; // Boot 3.4+: @MockBean is DEPRECATED, use @MockitoBean / @MockitoSpyBean
 
     @Test
     void shouldReturn200() throws Exception {
@@ -525,11 +843,24 @@ class OrderControllerTest {
             .andExpect(jsonPath("$.id").value(1));
     }
 }
+
+// MockMvcTester (Spring 6.2+) — AssertJ-fluent alternative to MockMvc
+@Autowired MockMvcTester mvc;
+
+assertThat(mvc.get().uri("/api/orders/1"))
+    .hasStatusOk()
+    .bodyJson()
+    .extractingPath("$.id").isEqualTo(1);
+
+// @ServiceConnection (Boot 3.1+) — removes DynamicPropertySource boilerplate
+@Container @ServiceConnection
+static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+// Spring auto-configures spring.datasource.* from the container. Works for Redis, Kafka, MongoDB, RabbitMQ, etc.
 ```
 
 ---
 
-## 9. Common Senior Interview Questions
+## 15. Common Senior Interview Questions
 
 **Q: How does Spring Boot start an application?**
 `SpringApplication.run()` → creates `ApplicationContext` → scans for `@Component`s → processes auto-configuration → starts embedded server (Tomcat/Jetty/Netty) → publishes `ApplicationReadyEvent`.
@@ -544,4 +875,22 @@ Avoid them if possible. Alternatives: Saga pattern (choreography or orchestratio
 Spring Profiles (`@Profile("prod")`, `application-prod.yml`), externalized config via environment variables, Spring Cloud Config Server, or Kubernetes ConfigMaps/Secrets. Sensitive values should use encrypted property sources (Vault, AWS Secrets Manager).
 
 **Q: What is the difference between `@RequestMapping` method-level exception handling vs `@ControllerAdvice`?**
-`@ExceptionHandler` in a controller handles exceptions from that controller only. `@ControllerAdvice` + `@ExceptionHandler` handles exceptions globally. Use `@RestControllerAdvice` for REST APIs to combine `@ControllerAdvice` + `@ResponseBody`.
+`@ExceptionHandler` in a controller handles exceptions from that controller only. `@ControllerAdvice` + `@ExceptionHandler` handles exceptions globally. Use `@RestControllerAdvice` for REST APIs to combine `@ControllerAdvice` + `@ResponseBody`. For standardized error bodies, return `ProblemDetail` (RFC 7807) or throw `ErrorResponseException`.
+
+**Q: `@GetMapping` vs `@RequestMapping`?**
+`@GetMapping`, `@PostMapping`, `@PutMapping`, `@DeleteMapping`, `@PatchMapping` are composed shortcuts that set `method = RequestMethod.X` on `@RequestMapping`. Prefer them — they document intent and reduce typos. `@RequestMapping` at class level remains useful to set a base path.
+
+**Q: When would you choose virtual threads over WebFlux?**
+Virtual threads let you keep imperative, blocking code (JDBC, JPA, synchronous clients) while scaling I/O concurrency similarly to reactive. Pick VTs when the team and ecosystem are synchronous; pick WebFlux when you need streaming/backpressure semantics or end-to-end non-blocking drivers. Don't mix: calling `.block()` from a VT on a reactive chain just re-introduces thread contention.
+
+**Q: When would you reach for Spring Modulith instead of microservices?**
+When your bounded contexts are real but you don't (yet) need independent deployability, polyglot storage, or independent scaling. Modulith enforces module boundaries at compile/test time, provides a transactional outbox via the Event Publication Registry, and keeps operational overhead at "one deployable". Split out a module to a microservice only when a forcing function appears (team autonomy, isolated scaling, different SLAs).
+
+**Q: What does Boot 3's AOT engine actually do at build time?**
+Processes `@Configuration` classes, resolves bean definitions, pre-creates CGLIB subclasses, evaluates most `@Conditional`s with a "build profile", and emits Java source + `reachability-metadata.json`. This speeds JVM startup (via generated `ApplicationContextInitializer`s) and is the prerequisite for GraalVM `native-image`. Consequence: runtime classpath scanning and dynamic bean registration are restricted; reflection needs explicit hints (`@RegisterReflectionForBinding`, `@Reflective`).
+
+**Q: How do you standardize error responses across a Spring Boot API?**
+Enable `spring.mvc.problemdetails.enabled=true` so built-in exceptions produce RFC 7807 responses, then add a `@RestControllerAdvice extends ResponseEntityExceptionHandler` that maps domain exceptions to `ProblemDetail` with a stable `type` URI, custom properties, and tracing correlation (`traceId`).
+
+**Q: `RestTemplate` vs `RestClient` vs `WebClient` vs `@HttpExchange` — which do you use?**
+`RestTemplate` is maintenance-only — don't start new code with it. Use `RestClient` for new synchronous code (same fluent API as `WebClient`, no WebFlux dependency). Use `WebClient` when you're in a reactive pipeline. Use `@HttpExchange` interfaces on top of either adapter for typed, declarative clients (replaces Feign in most cases).

@@ -14,13 +14,19 @@ Sits in front of **servers**. The client sends requests to the proxy, which forw
 All load balancers are reverse proxies, but not all reverse proxies are load balancers. A reverse proxy can serve a single backend server (for SSL termination, caching), while a load balancer specifically distributes traffic across multiple servers.
 
 ## Sidecar Proxy (Service Mesh)
-A proxy deployed alongside each service instance (same pod in Kubernetes). Handles networking concerns: mTLS, retries, circuit breaking, observability. The application code doesn't need to implement these.
+A proxy deployed alongside each service instance (same pod in Kubernetes). Handles networking concerns: mTLS, retries, circuit breaking, observability, traffic splitting, canary deploys. The application code doesn't need to implement these.
 
-**Examples**: Envoy (Istio), Linkerd proxy
+**Examples**: Envoy (Istio default), linkerd2-proxy (Rust, Linkerd), Cilium (eBPF)
 
 ```
 [Service A] ↔ [Sidecar Proxy] ←→ [Sidecar Proxy] ↔ [Service B]
 ```
+
+### Sidecarless / Ambient Mode (2024-2026)
+Running a sidecar per pod costs CPU and memory at scale. Modern meshes are moving to **sidecarless** architectures:
+- **Istio Ambient Mesh** (stable in 1.24, 2024): L4 handled by a per-node `ztunnel`, L7 by optional per-namespace `waypoint` proxies. Dramatically reduces overhead in dense clusters.
+- **Cilium Service Mesh**: eBPF-based, no userspace proxy for most paths. Leverages kernel networking for L4.
+- **Linkerd**: retains a sidecar but uses a lightweight Rust micro-proxy (~20-30 MB vs Envoy's ~50 MB).
 
 ## Common Implementations
 | Tool | Type | Notes |

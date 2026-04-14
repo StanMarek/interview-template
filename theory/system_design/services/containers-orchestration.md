@@ -23,7 +23,15 @@ Lightweight, isolated environments that package an application with its dependen
 ## Container Orchestration (Kubernetes)
 
 ### What It Is
-Kubernetes (K8s) automates deployment, scaling, and management of containerized applications across a cluster of machines.
+Kubernetes (K8s) automates deployment, scaling, and management of containerized applications across a cluster of machines. Current stable releases: **1.32 "Penelope" (Dec 2024)**, **1.33 "Octarine" (Apr 2025)**, **1.34 (Aug 2025)** — Kubernetes now releases three minor versions per year with roughly one year of patch support per version.
+
+### Notable Recent Changes
+- **Dockershim removed in 1.24** — you must use a CRI runtime (containerd, CRI-O). "Docker in K8s" now means containerd under the hood.
+- **PodSecurityPolicy removed in 1.25** — replaced by Pod Security Admission (baseline/restricted/privileged profiles).
+- **Sidecar containers** (native) GA in 1.33 — first-class restartPolicy=Always init containers.
+- **Gateway API** (successor to Ingress) GA in 1.31 for core types.
+- **In-place Pod resize** beta in 1.33 — vertical scaling without restart.
+- **CEL-based ValidatingAdmissionPolicy** (no webhook) GA in 1.30.
 
 ### Core Concepts
 
@@ -42,8 +50,8 @@ Kubernetes (K8s) automates deployment, scaling, and management of containerized 
 | **PersistentVolume (PV)** | Storage abstraction. Decouples storage from pod lifecycle. |
 
 ### Kubernetes Architecture
-- **Control plane**: API Server (entry point), etcd (state store), Scheduler (pod placement), Controller Manager (desired state reconciliation)
-- **Worker nodes**: kubelet (node agent), kube-proxy (networking), container runtime (containerd)
+- **Control plane**: API Server (entry point), etcd (state store, v3.5/3.6), Scheduler (pod placement), Controller Manager (desired state reconciliation)
+- **Worker nodes**: kubelet (node agent), kube-proxy (or eBPF-based replacement like Cilium), container runtime (containerd / CRI-O — **NOT Docker directly since 1.24**)
 
 ### Deployment Strategies
 | Strategy | How It Works | Risk |

@@ -70,30 +70,37 @@ Add 2-3x for redundancy
 | Twitter scale | 300M | ~300K read QPS |
 | Google Search | 1B+ | ~70K QPS |
 
-### Latency Numbers (Jeff Dean's)
+### Latency Numbers (Updated — modern NVMe SSDs are ~10× faster than Jeff Dean's 2012 numbers)
 | Operation | Time |
 |-----------|------|
 | L1 cache ref | 0.5 ns |
 | L2 cache ref | 7 ns |
-| Main memory ref | 100 ns |
-| SSD random read | 150 μs |
-| HDD seek | 10 ms |
-| Network: same datacenter | 0.5 ms |
-| Network: CA → Netherlands | 150 ms |
-| Read 1 MB sequentially from memory | 250 μs |
-| Read 1 MB sequentially from SSD | 1 ms |
-| Read 1 MB sequentially from HDD | 20 ms |
+| Main memory ref (DRAM) | 100 ns |
+| NVMe SSD random read (2025) | ~10-100 μs |
+| SATA SSD random read (classic) | ~100-150 μs |
+| HDD seek | ~5-10 ms |
+| Network: same datacenter RTT | ~0.5 ms |
+| Network: same continent RTT | ~10-30 ms |
+| Network: cross-continent RTT (e.g. CA → Europe) | ~100-150 ms |
+| TLS handshake (TLS 1.3 0-RTT) | ~0-1 RTT |
+| TLS handshake (TLS 1.2) | ~2 RTTs |
+| Read 1 MB sequentially from DRAM | ~100-250 μs |
+| Read 1 MB sequentially from NVMe SSD | ~200-500 μs |
+| Read 1 MB sequentially from HDD | ~10-20 ms |
+| Gzip compression of 1 KB | ~3 μs |
+| UUID generation | ~100 ns |
 
-### System Capacity Rules of Thumb
+### System Capacity Rules of Thumb (2025-2026)
 | Component | Typical Capacity |
 |-----------|-----------------|
-| Single web server | 1K-10K QPS (depends on workload) |
-| Single Redis instance | 100K QPS (simple ops) |
-| Single MySQL instance | 1K-10K QPS (depends on query complexity) |
-| Single Kafka broker | 100K-200K msgs/sec |
-| Single machine memory | 64-512 GB |
-| Single machine disk | 1-16 TB SSD |
-| Network bandwidth (datacenter) | 1-10 Gbps |
+| Single web server (Node/Go/Java) | 5K-50K QPS (depends on workload) |
+| Single Redis instance | 100K-1M QPS (simple ops) |
+| Single MySQL/Postgres instance | 5K-20K QPS (depends on query complexity, SSD) |
+| Single Kafka broker | 100K-1M msgs/sec (with batching + compression) |
+| Single ElasticSearch node | 1K-10K QPS (depends on query type) |
+| Single machine memory (cloud VM) | 128 GB - 2 TB |
+| Single machine disk | 2-32 TB NVMe SSD |
+| Network bandwidth (datacenter) | 10-100 Gbps |
 
 ## Worked Example: URL Shortener
 

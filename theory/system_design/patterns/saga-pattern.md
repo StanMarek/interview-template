@@ -71,6 +71,9 @@ Not all operations are easily reversible:
 
 Design tip: Delay irreversible operations until the end of the saga when possible.
 
+### Reliable Event Publishing (Outbox Pattern)
+A saga step that updates the local DB AND publishes an event has a **dual-write problem**: if the DB commit succeeds but the event publish fails (or vice versa), the saga breaks. The standard solution is the **Transactional Outbox Pattern**: write the event to an `outbox` table within the same DB transaction, then a separate relay process (poller or Debezium CDC) publishes outbox rows to Kafka/RabbitMQ. See [outbox-pattern.md](outbox-pattern.md).
+
 ## Saga vs 2PC (Two-Phase Commit)
 
 | Feature | Saga | 2PC |

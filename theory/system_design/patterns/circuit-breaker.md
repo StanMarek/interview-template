@@ -72,10 +72,11 @@ Client → Service A → Service B → Service C (fails)
 ## Implementations
 | Library | Language | Notes |
 |---------|----------|-------|
-| Resilience4j | Java | Circuit breaker, retry, bulkhead, rate limiter |
-| Polly | .NET | All resilience patterns |
-| Hystrix | Java | Netflix (deprecated, but concepts are foundational) |
-| Envoy/Istio | Service mesh | Circuit breaking at the infrastructure level |
+| Resilience4j | Java | Modern Hystrix replacement; functional/decorator API, Java 8+, Spring Boot 3 integration |
+| Polly | .NET | All resilience patterns; pipeline API since v8 |
+| Hystrix | Java | Netflix — in maintenance mode since 2018; do NOT use for new projects (Netflix itself recommends Resilience4j) |
+| Envoy / Istio / Linkerd | Service mesh | Circuit breaking at the infrastructure level — preferred when you don't want library coupling per language |
+| Failsafe | Java | Lightweight alternative to Resilience4j |
 
 ## Possible Interview Questions
 1. "How do you prevent a failing microservice from taking down the entire system?"

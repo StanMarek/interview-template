@@ -66,9 +66,10 @@ Gradually replace monolith components with microservices. New features go to mic
 ## Communication Patterns
 
 ### Synchronous (Request/Response)
-- **REST**: Simple, widely understood, HTTP-based
-- **gRPC**: Efficient binary protocol (Protobuf), streaming support, code generation
-- **GraphQL**: Client specifies exactly what data it needs
+- **REST (JSON over HTTP/1.1 or HTTP/2)**: Simple, human-readable, browser-friendly, easy to debug. Default for public-facing APIs.
+- **gRPC (Protobuf over HTTP/2)**: Binary, 5-10× faster on the wire, native streaming (server, client, bidirectional), code-generated stubs. Default for **internal service-to-service** traffic in 2025-2026. Downside: not natively browser-compatible (needs gRPC-Web + proxy).
+- **GraphQL**: Client specifies exactly what data it needs; reduces over-fetching. Best for BFF/aggregation layers with heterogeneous clients. Added complexity: N+1 queries, caching, schema governance.
+- **tRPC / OpenAPI-typed clients**: End-to-end type safety without the complexity of gRPC, popular in TypeScript monorepos.
 
 ### Asynchronous (Event-Driven)
 - **Message Queue**: Service A publishes event → queue → Service B consumes

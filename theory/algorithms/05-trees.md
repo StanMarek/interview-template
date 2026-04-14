@@ -55,6 +55,11 @@ bst.higherKey(5);      // smallest key > 5
 | Delete    | O(log n)       | O(n)              | O(log n)|
 | Min/Max   | O(log n)       | O(n)              | O(log n)|
 
+### Self-Balancing Trees: AVL vs Red-Black
+
+- **AVL:** Strictly balanced (height diff ≤ 1). Faster lookups, more rotations on insert/delete. Good for read-heavy.
+- **Red-Black:** Loosely balanced (longest path ≤ 2× shortest). Fewer rotations, faster mutations. **Java's `TreeMap`/`TreeSet` use Red-Black trees.** `HashMap` buckets also convert to Red-Black trees when a bucket exceeds 8 entries (treeify threshold).
+
 ## Tree Traversals
 
 The foundation of all tree problems. Know all four by heart.
@@ -250,7 +255,70 @@ private TreeNode build(int[] preorder, int left, int right) {
 }
 ```
 
-### 6. Serialize / Deserialize
+### 6. BST Delete (with Inorder Successor)
+
+```java
+// Delete a node in a BST — replace with inorder successor when both children exist
+public TreeNode deleteNode(TreeNode root, int key) {
+    if (root == null) return null;
+    if (key < root.val)       root.left  = deleteNode(root.left, key);
+    else if (key > root.val)  root.right = deleteNode(root.right, key);
+    else {                                      // found
+        if (root.left == null)  return root.right;
+        if (root.right == null) return root.left;
+        TreeNode succ = root.right;             // inorder successor = leftmost of right
+        while (succ.left != null) succ = succ.left;
+        root.val = succ.val;
+        root.right = deleteNode(root.right, succ.val);
+    }
+    return root;
+}
+```
+
+### 7. Tree Views
+
+```java
+// Right Side View — last node at each level (BFS)
+public List<Integer> rightSideView(TreeNode root) {
+    List<Integer> res = new ArrayList<>();
+    if (root == null) return res;
+    Queue<TreeNode> q = new ArrayDeque<>();
+    q.offer(root);
+    while (!q.isEmpty()) {
+        int sz = q.size();
+        for (int i = 0; i < sz; i++) {
+            TreeNode n = q.poll();
+            if (i == sz - 1) res.add(n.val);    // rightmost
+            if (n.left  != null) q.offer(n.left);
+            if (n.right != null) q.offer(n.right);
+        }
+    }
+    return res;
+}
+
+// Vertical Order — group by column index (col-1 left, col+1 right). Use TreeMap<col, List>.
+// Boundary Traversal — root + left boundary (top-down) + leaves (L→R) + right boundary (bottom-up).
+```
+
+### 8. Tree DP / Path Sum Patterns
+
+```java
+// Max Path Sum (any-to-any) — classic "return best single branch, update global with both"
+int maxSum = Integer.MIN_VALUE;
+public int maxPathSum(TreeNode root) { gain(root); return maxSum; }
+private int gain(TreeNode n) {
+    if (n == null) return 0;
+    int l = Math.max(0, gain(n.left));
+    int r = Math.max(0, gain(n.right));
+    maxSum = Math.max(maxSum, n.val + l + r);   // path through n
+    return n.val + Math.max(l, r);              // path extending upward
+}
+
+// Path Sum III — count downward paths summing to target. Prefix-sum + HashMap (O(n)).
+// House Robber III — tree DP returning {rob, skip} pair at each node.
+```
+
+### 9. Serialize / Deserialize
 
 ```java
 // Using preorder with "null" markers
@@ -274,6 +342,36 @@ private TreeNode buildFromArray(String[] nodes) {
 }
 ```
 
+## Advanced: Range Query Structures
+
+Rarely required in standard interviews but surface in senior/competitive rounds.
+
+### Fenwick Tree (Binary Indexed Tree)
+
+Point update + prefix/range sum in O(log n). Compact (~10 lines). Good for inversion count, range-sum with updates.
+
+```java
+class BIT {
+    int[] t;
+    BIT(int n) { t = new int[n + 1]; }
+    void update(int i, int delta) { for (; i < t.length; i += i & -i) t[i] += delta; }
+    int query(int i) { int s = 0; for (; i > 0; i -= i & -i) s += t[i]; return s; } // prefix [1..i]
+    int range(int l, int r) { return query(r) - query(l - 1); }
+}
+```
+
+### Segment Tree
+
+Range queries (sum/min/max/gcd) + range updates with lazy propagation. O(n) build, O(log n) per op. Use when queries aren't prefix-decomposable (e.g., range min).
+
+### LCA via Binary Lifting
+
+O(n log n) preprocessing, O(log n) per query — beats the naive recursive LCA for multiple queries on static trees. Precompute `up[v][k] = 2^k-th ancestor of v` plus `depth[v]`. Jump `u` up to match `v`'s depth, then lift both until parents match.
+
+### Euler Tour + RMQ
+
+Flatten the tree via DFS; LCA of (u,v) = node with min depth in the Euler array between their first occurrences. Reduces LCA → Range Minimum Query (sparse table: O(n log n) build, O(1) query).
+
 ## Common Interview Problems
 
 ### Easy
@@ -282,15 +380,17 @@ private TreeNode buildFromArray(String[] nodes) {
 - Balanced Binary Tree, Minimum Depth
 
 ### Medium
-- Validate BST, Kth Smallest Element in BST, BST Iterator
-- Lowest Common Ancestor, Binary Tree Level Order Traversal
+- Validate BST, Kth Smallest Element in BST, BST Iterator, Delete Node in a BST
+- Lowest Common Ancestor, Binary Tree Level Order Traversal, Zigzag Level Order
 - Construct Binary Tree from Preorder and Inorder
 - Binary Tree Right Side View, Flatten Binary Tree to Linked List
 - Count Good Nodes, Path Sum II/III, Populating Next Right Pointers
+- Diameter of Binary Tree, House Robber III, All Nodes Distance K
 
 ### Hard
 - Serialize and Deserialize Binary Tree, Binary Tree Maximum Path Sum
-- Recover Binary Search Tree, Vertical Order Traversal
+- Recover Binary Search Tree, Vertical Order Traversal, Boundary of Binary Tree
+- Range Sum Query - Mutable (segment tree / BIT), Count of Smaller Numbers After Self (BIT)
 
 ## Tips and Pitfalls
 
@@ -301,3 +401,6 @@ private TreeNode buildFromArray(String[] nodes) {
 - **Use `long` for BST validation bounds** to handle `Integer.MIN_VALUE` and `Integer.MAX_VALUE` edge cases.
 - **Don't confuse depth and height:** Depth is from root down, height is from leaf up.
 - **Recursive vs. iterative:** Be prepared to do both. Morris traversal gives O(1) space but is harder to code — know it exists and when to mention it.
+- **BST kth smallest / successor:** Iterative inorder with early exit, or augment nodes with subtree size for O(log n) lookup.
+- **Multi-query LCA:** Plain recursion is O(n) per query; switch to binary lifting (O(log n) after O(n log n) prep) when many queries hit the same tree.
+- **Prefix sum on trees:** For "path sum equals K" style problems, carry a HashMap of prefix sums down the recursion and decrement on backtrack — analogue of the array prefix-sum trick.

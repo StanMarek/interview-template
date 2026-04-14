@@ -9,7 +9,7 @@ Many distributed algorithms require a single coordinator: database write leaders
 ## Approaches
 
 ### Bully Algorithm
-Node with the highest ID becomes leader. If the current leader fails, the highest-ID surviving node takes over. Simple but not partition-tolerant.
+Node with the highest ID becomes leader. If the current leader fails, the highest-ID surviving node takes over. Simple but not partition-tolerant, and rarely used in modern systems.
 
 ### Raft-Based Election
 Nodes are in one of three states: follower, candidate, leader. On leader timeout, a follower becomes a candidate and requests votes. Majority wins. Heartbeats maintain leadership.
@@ -28,7 +28,12 @@ The node that successfully updates the row is the leader. Must renew the lease b
 ## Fencing Tokens
 **Problem**: An old leader (paused by GC or network partition) resumes thinking it's still the leader → split-brain.
 
-**Solution**: Each leader election issues a monotonically increasing **fencing token** (epoch number). All operations include the token. The storage/resource rejects operations with older tokens.
+**Solution**: Each leader election issues a monotonically increasing **fencing token** (epoch number). All operations include the token. The storage/resource rejects operations with older tokens. This is the standard safety mechanism in systems like HDFS, GFS, and Kafka (where it's called the **leader epoch**).
+
+## Practical Notes
+- **Kafka** uses a controller (elected via KRaft / Raft since 4.0; via ZooKeeper before) to assign partition leaders. Partition leaders themselves are not elected — the controller picks them from the ISR (in-sync replicas).
+- **Kubernetes** uses the `coordination.k8s.io/Lease` API for leader election of controllers (kube-controller-manager, kube-scheduler) — a lease-based mechanism backed by etcd.
+- **Always prefer a mature coordination service** (etcd, ZooKeeper, Consul) over rolling your own. Correct leader election is notoriously hard.
 
 ## Possible Interview Questions
 1. "How would you ensure only one instance runs a scheduled job in a distributed system?"

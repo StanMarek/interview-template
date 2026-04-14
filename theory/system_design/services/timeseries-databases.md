@@ -22,14 +22,15 @@ Databases optimized for storing and querying time-stamped data points. They hand
 
 | Database | Notes |
 |----------|-------|
-| **InfluxDB** | Purpose-built TSDB, SQL-like query language (Flux/InfluxQL) |
-| **Prometheus** | Pull-based metrics collection, PromQL, Kubernetes standard |
-| **TimescaleDB** | PostgreSQL extension — full SQL with time-series optimizations |
-| **OpenTSDB** | Built on HBase, good for Hadoop environments |
+| **InfluxDB** | Purpose-built TSDB. InfluxDB 3 (GA 2024) rebuilt in Rust on Apache Arrow / DataFusion / Parquet — SQL is now first-class, Flux deprecated. |
+| **Prometheus** | Pull-based metrics collection, PromQL, Kubernetes standard. Prometheus 3.0 (Nov 2024) added native histograms, OTLP ingestion, UTF-8 labels. |
+| **TimescaleDB** | PostgreSQL extension — full SQL with time-series optimizations. Core parts moved from Apache 2.0 to TSL (source-available) in 2024. |
+| **OpenTSDB** | Built on HBase, good for Hadoop environments (mostly legacy in 2025) |
 | **QuestDB** | High-performance, SQL-compatible, columnar storage |
-| **Amazon Timestream** | Managed, serverless TSDB |
+| **Amazon Timestream** | Managed, serverless TSDB. Timestream for InfluxDB (2024) now offered alongside the original LiveAnalytics engine. |
 | **ClickHouse** | Columnar OLAP database, excellent for time-series analytics |
 | **VictoriaMetrics** | Prometheus-compatible, long-term storage |
+| **Grafana Mimir / Loki / Tempo** | Horizontally scalable Prometheus-compatible metrics (Mimir), logs (Loki), traces (Tempo). |
 
 ## Storage Model
 Most TSDBs use **columnar storage** and **compression**: since values in the same column (e.g., "temperature") are similar, they compress very well (10-20x compression ratios). Combined with LSM trees or append-only logs for write performance.

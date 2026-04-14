@@ -19,7 +19,7 @@ Distributed coordination services that provide primitives for building reliable 
 - **Consistency**: Linearizable writes (all go through the leader). Sequential reads (reads may be stale unless using `sync`).
 - **Consensus**: ZAB (ZooKeeper Atomic Broadcast) — similar to Raft.
 - **Quorum**: 2F+1 nodes tolerate F failures (3 nodes tolerate 1, 5 tolerate 2).
-- **Used by**: Kafka (older versions), HBase, Hadoop, Solr, ClickHouse.
+- **Used by**: HBase, Hadoop, Solr, ClickHouse. (Kafka removed ZooKeeper in 4.0 — replaced by KRaft.)
 
 ## etcd
 - **Data model**: Flat key-value store (keys are byte strings, often used with `/`-separated paths)
@@ -27,6 +27,7 @@ Distributed coordination services that provide primitives for building reliable 
 - **Watch**: Efficient streaming watch API (long-lived gRPC stream)
 - **Lease**: TTL-based keys. If lease expires, key is deleted. Used for service registration and leader election.
 - **Transactions**: Multi-key atomic compare-and-swap
+- **Current version**: etcd v3.5 (LTS) and v3.6 (2024+, downgrade support, better memory management, feature gates). v2 API was removed in v3.6.
 - **Used by**: Kubernetes (backing store for all cluster state), CoreDNS
 
 ## Consul
@@ -49,12 +50,12 @@ Distributed coordination services that provide primitives for building reliable 
 | Service discovery | DIY with ephemeral znodes | DIY with leases | Built-in |
 | Health checks | Session-based | Lease-based | Built-in (HTTP, TCP, script) |
 | Language | Java | Go | Go |
-| Typical use | Kafka, Hadoop ecosystem | Kubernetes | Service mesh, multi-DC |
+| Typical use | Hadoop ecosystem, HBase | Kubernetes | Service mesh, multi-DC |
 
 ## When to Use
-- **ZooKeeper**: You're in the Kafka/Hadoop ecosystem and need battle-tested coordination
+- **ZooKeeper**: You're in the Hadoop/HBase/Solr ecosystem and need battle-tested coordination (Kafka no longer uses it as of 4.0)
 - **etcd**: You're using Kubernetes, or need a simple, reliable KV with strong consistency
-- **Consul**: You need service discovery + health checks + KV + service mesh in one tool
+- **Consul**: You need service discovery + health checks + KV + service mesh in one tool. Note: HashiCorp relicensed Consul to BSL in 2023 — OpenTofu-style forks have not taken off, but check licensing for commercial use.
 
 ## Possible Interview Questions
 1. "How would you implement leader election using ZooKeeper?"

@@ -1,17 +1,21 @@
 # Java OOP — Abstraction, Inheritance, Polymorphism & Encapsulation
 
+> **Modernization note (Java 25 LTS, Sept 2025)**: The OOP landscape in modern Java has shifted significantly. Classical class-heavy inheritance is no longer the default — senior engineers are expected to reach for **records** (data), **sealed types** (closed hierarchies / ADTs), **pattern matching** (destructuring + exhaustive dispatch), and **interfaces with default methods** (behaviour composition) before abstract classes. The material below covers the classical pillars *and* how they are expressed idiomatically today.
+
 ---
 
 ## 1. The Four Pillars of OOP
 
 ### Overview
 
-| Pillar | Purpose | Java Mechanism |
-|--------|---------|----------------|
-| **Abstraction** | Hide complexity, expose essentials | Abstract classes, interfaces |
-| **Encapsulation** | Protect internal state, control access | Access modifiers, getters/setters |
-| **Inheritance** | Reuse and extend behavior | `extends`, `implements` |
-| **Polymorphism** | One interface, many implementations | Method overriding, overloading, generics |
+| Pillar | Purpose | Java Mechanism | Modern Java Expression |
+|--------|---------|----------------|-----------------------|
+| **Abstraction** | Hide complexity, expose essentials | Abstract classes, interfaces | Sealed interfaces + records as ADTs |
+| **Encapsulation** | Protect internal state, control access | Access modifiers, getters/setters | Records, modules, `private` constructors, `List.copyOf` |
+| **Inheritance** | Reuse and extend behavior | `extends`, `implements` | Interface composition; sealed hierarchies with `permits` |
+| **Polymorphism** | One interface, many implementations | Method overriding, overloading, generics | Pattern matching switch + record deconstruction |
+
+**Shift since Java 8 → 25**: Inheritance as the primary reuse mechanism has lost ground to composition and *data-oriented programming* (JEP amber design notes). "Make illegal states unrepresentable" through sealed + records is now a first-class idiom, not an FP curiosity.
 
 ---
 
@@ -190,14 +194,23 @@ public interface DataProcessor {
 | Want to provide significant shared logic | Want to decouple completely |
 | Need non-public methods in the contract | API stability with default methods |
 
-**Rule of thumb**: Prefer interfaces. Use abstract classes when you need shared state or a substantial template of behavior. Many designs use both: interface for the public contract, abstract class as a skeleton implementation.
+**Rule of thumb (modern)**: *Default* to interfaces — they impose the fewest constraints, enable multiple inheritance of type, and compose cleanly with records. Use abstract classes only when multiple subclasses truly share **state** (fields) and **constructor logic**. Many designs use both: interface for the public contract, abstract class as a *skeletal implementation* (Effective Java Item 20).
+
+**Decision tree**:
+1. Pure data carrier → `record`
+2. Closed set of shapes (ADT) → `sealed interface` + records/finals
+3. Capability unrelated classes might need → `interface` (with `default` methods where safe)
+4. Non-trivial shared state + constructor logic → `abstract class` (only if #3 is insufficient)
+5. Template algorithm with overridable hooks → `abstract class` with `final` template method + protected abstract hooks
 
 ```java
-// Classic JDK example: both interface and abstract class
+// Classic JDK example: both interface and abstract class (skeletal implementation)
 public interface List<E> extends Collection<E> { ... }        // Contract
-public abstract class AbstractList<E> implements List<E> { ... } // Skeleton
+public abstract class AbstractList<E> implements List<E> { ... } // Skeleton (convention: Abstract<Interface>)
 public class ArrayList<E> extends AbstractList<E> { ... }        // Concrete
 ```
+
+**Effective Java Item 20 — Skeletal implementation pattern**: Ship an `AbstractXxx` alongside every non-trivial exported interface so users get implementation help for free without being locked into inheritance (they can always implement the interface directly).
 
 ---
 
@@ -372,6 +385,44 @@ public class Config {
 - Classes: When inheritance would break invariants (immutable classes, security-sensitive classes)
 - Methods: Template Method pattern (the template itself should be final), security-critical methods
 - Fields: Immutability by default — make everything final unless mutation is needed
+
+**Modern default (Java 21+)**: *Design for inheritance or prohibit it* (Effective Java Item 19). If a class is not explicitly designed and documented to be subclassed — make it `final` (or use `sealed ... permits ...` to whitelist exactly who may extend). Records are implicitly `final`; enum constants cannot be extended. The modern codebase treats `final` as the default and extensibility as a deliberate design act.
+
+### Composition vs Inheritance in Practice
+
+The classical guidance ("favour composition over inheritance") is sharper with modern Java features. Concrete heuristics:
+
+| Symptom | Likely Fix |
+|---------|-----------|
+| Subclass overrides one method to change behaviour | Pass a `Function`/`Strategy` into the constructor |
+| Deep hierarchy (3+ levels) for reuse | Flatten: record + injected collaborators |
+| Subclass needs ≤ 2 of the parent's methods | Parent should expose an interface; subclass implements it instead |
+| Parent has protected fields mutated by subclasses | Encapsulate as state object passed via composition |
+| `instanceof` checks proliferating over a hierarchy | Sealed types + `switch` pattern match |
+| Sharing behaviour between unrelated types | Interface with `default` methods |
+
+**Rule**: Inherit from *your own* classes only. Extending third-party classes (especially `HashSet`, `HashMap`, `ArrayList`) is a fragile-base-class landmine — wrap and delegate instead (see `InstrumentedSet` above).
+
+```java
+// ANTIPATTERN — inheritance for reuse
+class EmailNotifier extends AbstractNotifier { ... }
+class SmsNotifier extends AbstractNotifier { ... }
+class SlackNotifier extends AbstractNotifier { ... }
+
+// MODERN — sealed interface + records + composition
+public sealed interface Notifier permits EmailNotifier, SmsNotifier, SlackNotifier {
+    void send(Message m);
+}
+public record EmailNotifier(SmtpClient client, String fromAddress) implements Notifier {
+    @Override public void send(Message m) { client.send(fromAddress, m); }
+}
+public record SmsNotifier(TwilioClient client) implements Notifier {
+    @Override public void send(Message m) { client.sms(m.to(), m.body()); }
+}
+public record SlackNotifier(SlackWebhook webhook) implements Notifier {
+    @Override public void send(Message m) { webhook.post(m.channel(), m.body()); }
+}
+```
 
 ---
 
@@ -639,28 +690,65 @@ public class EquilateralTriangle extends Triangle { ... }       // OK
 public class RightTriangle extends Triangle { ... }             // OK
 ```
 
+**Three modifiers for `permits` targets**:
+
+| Modifier | Semantics | Use Case |
+|----------|-----------|----------|
+| `final` | No further subclassing allowed | Leaf in the hierarchy (most common; records are implicitly final) |
+| `sealed` | Further controlled inheritance | Intermediate nodes in a multi-level ADT |
+| `non-sealed` | Open extension (classic inheritance resumes) | Framework integration, plugin seams |
+
+**Same-module rule**: If no explicit `permits` clause is written, the compiler infers it from the same compilation unit (file). `permits` is required when subtypes live in other files. All permitted subtypes must live in the **same module** (or same unnamed module / package when unmodular).
+
 **Why sealed types matter**:
-1. **Exhaustive pattern matching**: Compiler knows all subtypes → no `default` needed in switch
-2. **Domain modeling**: Express "a Payment is either Card, BankTransfer, or Crypto — nothing else"
-3. **Algebraic Data Types**: Enables sum types in Java (like Rust enums, Kotlin sealed classes)
+1. **Exhaustive pattern matching**: Compiler knows all subtypes → no `default` needed in switch; adding a new subtype triggers compile errors in every non-exhaustive switch — a feature, not a bug.
+2. **Domain modeling**: Express "a Payment is either Card, BankTransfer, or Crypto — nothing else."
+3. **Algebraic Data Types**: Enables sum types in Java (like Rust enums, Kotlin sealed classes, Haskell `data`).
+4. **API design**: Tell callers "handle every case" at compile time. See JEP 409 and the amber design notes "Data Oriented Programming for Java."
+
+### Algebraic Data Types: Records (Product) + Sealed (Sum)
+
+Modern Java has full ADT support:
+
+- **Product types** (`record`) = AND: a `Point` has an `x` AND a `y`.
+- **Sum types** (`sealed interface`) = OR: a `Result` is a `Success` OR a `Failure`.
+- Combine them and you get rich, exhaustively-matchable domain models.
 
 ```java
-// Domain modeling with sealed types
+// Result<T> — Either/Result monad, Java-style
+public sealed interface Result<T> permits Result.Success, Result.Failure {
+    record Success<T>(T value) implements Result<T> {}
+    record Failure<T>(String message, Throwable cause) implements Result<T> {}
+
+    default <R> Result<R> map(Function<T, R> fn) {
+        return switch (this) {
+            case Success<T>(T v)       -> new Success<>(fn.apply(v));
+            case Failure<T>(var m, var c) -> new Failure<>(m, c);
+        };
+    }
+}
+
+// Domain modeling with sealed types — exhaustive + type-safe
 public sealed interface PaymentMethod {
     record CreditCard(String token, String last4) implements PaymentMethod {}
     record BankTransfer(String iban) implements PaymentMethod {}
     record Crypto(String walletAddress, CryptoType type) implements PaymentMethod {}
 }
 
-// Exhaustive handling guaranteed by compiler
+// Compiler guarantees every case handled — adding a new subtype fails this switch to compile
 BigDecimal fee(PaymentMethod method) {
     return switch (method) {
-        case CreditCard cc  -> cc.last4().startsWith("4") ? VISA_FEE : DEFAULT_FEE;
-        case BankTransfer _ -> BANK_FEE;
-        case Crypto _       -> CRYPTO_FEE;
+        case CreditCard(_, var last4) when last4.startsWith("4") -> VISA_FEE;
+        case CreditCard cc       -> DEFAULT_FEE;
+        case BankTransfer(var iban) -> BANK_FEE;
+        case Crypto(_, var type) -> type == CryptoType.BTC ? BTC_FEE : CRYPTO_FEE;
     };
 }
 ```
+
+**Sealed vs `enum`**: Use `enum` for a closed set of *values without varying state*. Use sealed interface + records when each case carries **different data** (payload-varying sum types). Enums are the degenerate case where every variant has zero payload.
+
+**The Visitor pattern is obsolete**: Pre-Java 17, emulating exhaustive dispatch required the verbose Visitor pattern (double dispatch). With sealed + `switch`, the Visitor pattern collapses to a single switch expression — the compiler enforces exhaustiveness. Keep Visitor only when you cannot modify the hierarchy (third-party types).
 
 ---
 
@@ -801,9 +889,160 @@ record Team(String name, List<String> members) {
 }
 ```
 
+### Compact vs Canonical vs Explicit Constructors
+
+| Form | Signature | When to Use |
+|------|-----------|-------------|
+| **Compact** | `public Team { ... }` (no params) | Validate / normalize — compiler assigns fields after your code |
+| **Canonical (explicit)** | `public Team(String name, List<String> members) { ... }` | Rare — only when you need to change assignment semantics |
+| **Additional** | `public Team(String name) { this(name, List.of()); }` | Convenience factories; MUST delegate to canonical via `this(...)` |
+
+**Best-practice rules for records**:
+1. Validate in the compact constructor; throw `IllegalArgumentException` (or domain exception) so invalid instances cannot exist.
+2. Normalize values (trim strings, round `BigDecimal`, `List.copyOf`) in the compact constructor — you may reassign parameter variables, they become the field values.
+3. Never override an accessor to return mutable internals — if you *must* override, return a defensive copy.
+4. Use static factories (`Money.usd(10.00)`) for readable call sites; keep the canonical constructor for framework/serialization code.
+5. Prefer `Instant`, `LocalDate`, `UUID`, `BigDecimal`, `List.copyOf`, `Set.copyOf`, `Map.copyOf` — all immutable, record-safe.
+6. Serialization: records have a *custom* serialization protocol — fields are serialized via accessors and reconstructed via the canonical constructor, so validation is re-run on deserialize (unlike classes, which bypass constructors). This eliminates an entire category of `readObject` bugs.
+
+```java
+// Canonical form — validate + normalize + derive
+public record Email(String address) {
+    private static final Pattern RFC = Pattern.compile("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$");
+
+    public Email {                                // Compact
+        Objects.requireNonNull(address, "address");
+        address = address.trim().toLowerCase();   // Normalize
+        if (!RFC.matcher(address).matches())
+            throw new IllegalArgumentException("Invalid email: " + address);
+    }
+    public String domain() { return address.substring(address.indexOf('@') + 1); }
+}
+```
+
 ---
 
-## 10. Common Senior Interview Questions
+## 10. Liskov Substitution Principle (LSP) in Modern Java
+
+**LSP formal**: If `S <: T`, then an object of type `T` may be replaced with an object of type `S` without altering the desirable properties of the program (Barbara Liskov, 1987).
+
+**Behavioural requirements for subtypes**:
+- Preconditions cannot be *strengthened* in the subtype (can only require the same or less)
+- Postconditions cannot be *weakened* in the subtype (must guarantee the same or more)
+- Invariants of the supertype must be preserved
+- History constraint: state changes allowed by the subtype must be allowed by the supertype
+- Method must not throw *new* checked exceptions not declared in the supertype
+
+### Canonical LSP Violations
+
+**1. The Square/Rectangle trap** (aliasing invariants):
+```java
+class Rectangle {
+    protected int width, height;
+    public void setWidth(int w) { this.width = w; }
+    public void setHeight(int h) { this.height = h; }
+    public int area() { return width * height; }
+}
+class Square extends Rectangle {
+    @Override public void setWidth(int w) { this.width = w; this.height = w; }
+    @Override public void setHeight(int h) { this.width = h; this.height = h; }
+}
+// Client code using Rectangle contract:
+void grow(Rectangle r) {
+    r.setWidth(5); r.setHeight(4);
+    assert r.area() == 20;   // Passes for Rectangle, FAILS for Square (area == 16)
+}
+```
+Square *is-a* Rectangle mathematically, but Square *is-not-a* Rectangle behaviourally. Model it as a sealed ADT instead:
+```java
+sealed interface Shape permits Square, Rectangle {}
+record Square(int side) implements Shape { public int area() { return side * side; } }
+record Rectangle(int width, int height) implements Shape { public int area() { return width * height; } }
+```
+
+**2. `UnsupportedOperationException` anti-pattern**:
+```java
+class ImmutableList<E> extends ArrayList<E> {
+    @Override public boolean add(E e) { throw new UnsupportedOperationException(); }
+}
+// Any code expecting ArrayList.add() to return true silently breaks.
+```
+This is why `Collections.unmodifiableList` returns a *type-compatible wrapper* that is documented to throw — and why modern Java moved to `List.of()` / `List.copyOf()` returning an unnamed implementation of `List`, not a subclass of `ArrayList`.
+
+**3. Strengthening preconditions**:
+```java
+class Parent { void process(String s) { ... } }                // Accepts any String
+class Child extends Parent {
+    @Override void process(String s) {
+        if (s.length() < 5) throw new IllegalArgumentException(); // NEW precondition!
+        ...
+    }
+}
+```
+A caller holding a `Parent` reference has no way to know the stricter rule — LSP violated.
+
+**4. Covariant arrays** (built-in JDK violation):
+```java
+Integer[] ints = {1, 2, 3};
+Number[] nums = ints;      // Legal — arrays are covariant
+nums[0] = 3.14;            // Compiles! Throws ArrayStoreException at runtime.
+```
+This is why `List<Integer>` is *not* a `List<Number>` — generics are invariant by design to close this hole.
+
+### Modern LSP Enforcement Tools
+
+- **`final` / `sealed`** — prevent unauthorized subclasses that might violate invariants
+- **Records** — immutable, `equals`/`hashCode` from components, cannot violate state invariants
+- **`@Override`** — compiler verifies signature compatibility (does not verify *behaviour*, but catches typos)
+- **Contract tests** — if you publish a class meant to be subclassed, ship an abstract JUnit test suite that subclasses must pass (example: `AbstractListTest`)
+
+---
+
+## 11. Effective Java — Modern Recommendations for OOP
+
+Condensed senior-level checklist drawn from Bloch's *Effective Java 3e* and the amber/data-oriented-programming design notes, updated for Java 25:
+
+| Item | Modern Guidance |
+|------|----------------|
+| **15. Minimize accessibility** | Default to `private`; `package-private` for intra-package use; `public` only when the class is a documented API. Use modules (`exports`) for hard boundaries. |
+| **16. Use accessors, not public fields** | Records make this ergonomic — auto-generated accessors, no boilerplate. |
+| **17. Minimize mutability** | Records + immutable collections by default. Mutable objects are an opt-in, not a default. |
+| **18. Favor composition over inheritance** | Confirmed stronger than ever with sealed types and records. Inherit only from classes you control. |
+| **19. Design for inheritance or prohibit it** | Modern default: `final` unless `sealed permits ...` explicitly opens the door. |
+| **20. Prefer interfaces to abstract classes** | Enhanced with `default` and `private` methods; pair with a skeletal implementation when useful. |
+| **21. Design interfaces for posterity** | `default` methods are a compatibility tool, not a free extension — think about every implementer before adding one. |
+| **22. Use interfaces only to define types** | Not for constants — use an enum or `public static final` in a class. |
+| **23. Prefer class hierarchies to tagged classes** | *Revised*: prefer **sealed hierarchies with records** to tagged classes *and* to deep abstract hierarchies. |
+| **24. Favor static member classes** | Avoid non-static inner classes unless you need the enclosing-instance reference. |
+| **25. Limit source files to a single top-level class** | Still correct; records and sealed subtypes may nest within their defining interface for co-location. |
+| **NEW: Use data-oriented programming** | Amber's DOP design notes: model data with records + sealed + pattern matching; keep behaviour in separate services/functions. Avoid mixing "data that is" and "logic that does." |
+| **NEW: Make illegal states unrepresentable** | Use sealed ADTs, records with compact-constructor validation, and enums to push correctness into the type system. |
+| **NEW: Prefer `switch` expressions over `if/else` chains on type** | Pattern matching makes dispatch exhaustive and refactor-safe. |
+
+### Interface Evolution Safely
+
+`default` methods were added for library authors to evolve interfaces without breaking existing implementers — not as a general tool. When adding a default method:
+
+1. Make it *purely* derivable from other interface methods (e.g., `isEmpty() → size() == 0`)
+2. Document it as a "reasonable default" that implementers should override for performance/correctness
+3. Never rely on a default method for security-critical logic — an implementer can override it unsafely
+
+```java
+public interface Cache<K, V> {
+    Optional<V> get(K key);
+    void put(K key, V value);
+
+    // Safe default — derived from get()
+    default boolean contains(K key) { return get(key).isPresent(); }
+
+    // Private helper for default methods (Java 9+)
+    private Duration defaultTtl() { return Duration.ofMinutes(5); }
+}
+```
+
+---
+
+## 12. Common Senior Interview Questions
 
 **Q: Explain the difference between `IS-A` and `HAS-A` relationships.**
 `IS-A` = inheritance (`Dog IS-A Animal`). `HAS-A` = composition (`Car HAS-A Engine`). Favor HAS-A (composition) over IS-A (inheritance) because it's more flexible, avoids the fragile base class problem, and enables swapping implementations at runtime.
@@ -875,4 +1114,36 @@ List<? super Dog> writeOnly = animals;   // Can add Dog, reads as Object
 ```
 
 **Q: When would you use an abstract class with no abstract methods?**
-To prevent direct instantiation while providing a complete base implementation. Example: `AbstractList` has default implementations for most methods. Also used as a marker to signal "this is meant to be extended" or to provide a protected constructor with validation logic.
+To prevent direct instantiation while providing a complete base implementation. Example: `AbstractList` has default implementations for most methods. Also used as a marker to signal "this is meant to be extended" or to provide a protected constructor with validation logic. In modern Java, also consider whether a `sealed` interface with record implementations expresses the intent better.
+
+**Q: When do you use a record vs a class vs a sealed interface?**
+- **Record** — pure data carrier, value-like, no mutable state, identity doesn't matter. DTOs, value objects, intermediate computation tuples, API payloads.
+- **Sealed interface** — closed set of related types where each carries different data. Domain events, result/error types, tagged unions, state machine states.
+- **Regular class** — when you need mutable state, complex lifecycle, resource ownership, or thread-safe mutation (e.g., a connection pool, a cache, a stateful service).
+- **Abstract class** — rarely; only when multiple concrete classes truly share state + constructor logic that can't be expressed through interface defaults and composition.
+
+**Q: How does pattern matching with sealed types improve API design?**
+The compiler enforces exhaustiveness: every `switch` on a sealed type must handle every permitted subtype. Adding a new subtype triggers compile errors at every call site, so you cannot silently forget to handle the new case. This shifts correctness from "hope the test suite catches it" to "the code won't compile if wrong." It also eliminates the Visitor pattern for closed hierarchies — a single `switch` expression replaces the double-dispatch boilerplate.
+
+**Q: Why are records implicitly final?**
+To prevent LSP violations and preserve the value-type semantics. Records derive `equals`/`hashCode` from their components; if a subclass added fields, it would either break symmetry (two records with different subclass fields being `equals`) or the subclass would have to re-implement everything. Making records `final` closes this gap. If you need a closed hierarchy of records, use a sealed interface that permits them.
+
+**Q: What's the difference between `sealed`, `non-sealed`, and `final` subtypes?**
+Every direct subtype of a sealed parent must explicitly pick one:
+- `final` — no further subclassing (leaf in the hierarchy).
+- `sealed ... permits ...` — continues controlled inheritance (intermediate node).
+- `non-sealed` — opens extension again (framework plug-in seam).
+Records are implicitly `final`. `non-sealed` is useful when integrating with frameworks that need to generate proxies/subclasses (Spring, Hibernate), but it intentionally forfeits exhaustiveness guarantees.
+
+**Q: Compact constructor in a record — what actually happens?**
+The compact constructor has no parameter list; the compiler provides parameters named after the record components. Inside the body you can validate and reassign the parameter variables (not `this.x`, just `x`). The compiler then inserts `this.x = x; this.y = y; ...` at the end of your body. This makes it the canonical spot for normalization (trim, lowercase, `List.copyOf`) and validation (throw on invalid state).
+
+**Q: Why prefer sealed interface + records over a class hierarchy with `instanceof` checks?**
+1. **Exhaustiveness** — compiler enforces every case handled.
+2. **Immutability** — records give you final fields and value semantics free.
+3. **Deconstruction** — record patterns let you pull out components in the same line that matches the type.
+4. **Refactoring safety** — renaming or adding a subtype surfaces all affected switches at compile time.
+5. **Less code** — no abstract method overrides, no visitor boilerplate, no defensive `if (x instanceof Foo f)` cascades.
+
+**Q: Can default methods break backwards compatibility?**
+Yes, in subtle ways. If two interfaces independently add a `default` method with the same signature, classes implementing both now get a compile error (diamond conflict). If a default method name collides with an existing method in an implementer's superclass, the class method wins — which may silently change behaviour. Before adding a default method to a published interface, audit known implementations.

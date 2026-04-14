@@ -34,9 +34,13 @@ list.addLast(2);         // O(1)
 list.removeFirst();      // O(1)
 list.removeLast();       // O(1)
 list.get(2);             // O(n) — random access is slow
-list.peekFirst();        // O(1)
+list.peekFirst();        // O(1)   — returns null if empty
+list.getFirst();         // O(1)   — throws NoSuchElementException if empty
 list.peekLast();         // O(1)
-// Also implements Deque interface — can use as stack or queue
+// Java 21+: implements SequencedCollection — getFirst/getLast/addFirst/addLast/reversed() are standardized across List/Deque/LinkedHashSet/LinkedHashMap.
+list.reversed();         // O(1) reverse-ordered view (live, not a copy)
+// Also implements Deque — can use as stack (push/pop) or queue (offer/poll).
+// For interview problems, prefer ArrayDeque over LinkedList as a Deque: ~2× faster, less memory.
 ```
 
 ### Time Complexity
@@ -110,6 +114,8 @@ public ListNode detectCycle(ListNode head) {
     return null;
 }
 ```
+
+> **Brent's algorithm** is an alternative to Floyd's: the hare moves alone, the tortoise teleports to the hare every power-of-2 steps. Same O(n) time, O(1) space, ~36% fewer pointer moves on average, and it finds cycle length directly. Floyd's is the interview-standard answer; mention Brent if asked for alternatives.
 
 ### 3. Reverse a Linked List
 
@@ -225,6 +231,83 @@ public void reorderList(ListNode head) {
 }
 ```
 
+### 7. Reverse Nodes in k-Group
+
+Hard variant of reverse. Reverse each k-sized chunk; leave remainder as-is.
+
+```java
+public ListNode reverseKGroup(ListNode head, int k) {
+    ListNode dummy = new ListNode(0, head), groupPrev = dummy;
+    while (true) {
+        ListNode kth = groupPrev;
+        for (int i = 0; i < k && kth != null; i++) kth = kth.next;
+        if (kth == null) break;                 // fewer than k remaining
+        ListNode groupNext = kth.next;
+        // Reverse [groupPrev.next .. kth]
+        ListNode prev = groupNext, curr = groupPrev.next;
+        while (curr != groupNext) {
+            ListNode next = curr.next;
+            curr.next = prev;
+            prev = curr;
+            curr = next;
+        }
+        ListNode tmp = groupPrev.next;
+        groupPrev.next = kth;
+        groupPrev = tmp;
+    }
+    return dummy.next;
+}
+```
+
+### 8. Copy List with Random Pointer
+
+Classic "deep copy with arbitrary back-edges". Two idiomatic approaches.
+
+```java
+// O(n) time, O(n) space — HashMap old→new
+public Node copyRandomList(Node head) {
+    Map<Node, Node> map = new HashMap<>();
+    for (Node c = head; c != null; c = c.next) map.put(c, new Node(c.val));
+    for (Node c = head; c != null; c = c.next) {
+        map.get(c).next   = map.get(c.next);
+        map.get(c).random = map.get(c.random);
+    }
+    return map.get(head);
+}
+
+// O(n) time, O(1) extra — interleave A→A'→B→B'→..., then split
+```
+
+### 9. LRU Cache (Doubly Linked List + HashMap)
+
+HashMap for O(1) lookup; doubly linked list maintains recency (head = MRU, tail = LRU). Every `get`/`put` moves the node to head; on overflow, evict tail. Always use a dummy head and dummy tail to remove edge cases.
+
+```java
+class LRUCache {
+    private final int cap;
+    private final Map<Integer, Node> map = new HashMap<>();
+    private final Node head = new Node(0,0), tail = new Node(0,0);
+    LRUCache(int cap) { this.cap = cap; head.next = tail; tail.prev = head; }
+
+    public int get(int k) {
+        Node n = map.get(k);
+        if (n == null) return -1;
+        remove(n); addFirst(n);
+        return n.val;
+    }
+    public void put(int k, int v) {
+        if (map.containsKey(k)) { Node n = map.get(k); n.val = v; remove(n); addFirst(n); return; }
+        if (map.size() == cap) { map.remove(tail.prev.key); remove(tail.prev); }
+        Node n = new Node(k, v); map.put(k, n); addFirst(n);
+    }
+    private void addFirst(Node n) { n.next = head.next; n.prev = head; head.next.prev = n; head.next = n; }
+    private void remove(Node n)   { n.prev.next = n.next; n.next.prev = n.prev; }
+    static class Node { int key, val; Node prev, next; Node(int k, int v){key=k;val=v;} }
+}
+```
+
+> Java shortcut: `LinkedHashMap` with `accessOrder=true` + override `removeEldestEntry` gives an LRU in ~10 lines. Interviewers usually want the manual version.
+
 ## Common Interview Problems
 
 ### Easy
@@ -255,3 +338,9 @@ public void reorderList(ListNode head) {
 - **Recursive solutions** are elegant but use O(n) stack space. Interviewers may ask for iterative alternatives.
 - **Test edge cases:** empty list (`null`), single node, two nodes, odd/even length.
 - **In-place vs. creating new nodes:** Most interview problems expect in-place modification by rewiring pointers, not creating new nodes.
+- **Prefer `ArrayDeque` over `LinkedList`** when you just need a stack/queue/deque — better cache locality, no per-node object overhead.
+- **Java 21+ `SequencedCollection`:** `getFirst()`/`getLast()`/`reversed()` are now uniform across `List`, `Deque`, `LinkedHashSet`, `LinkedHashMap`. `reversed()` is a live view, not a copy.
+
+## Skip Lists (Mention Only)
+
+Probabilistic alternative to balanced BSTs: layered linked lists where each node appears in level `i` with probability `p^i`. Expected O(log n) search/insert/delete with much simpler code than a red-black tree. Java uses skip lists internally in `ConcurrentSkipListMap` / `ConcurrentSkipListSet`. Rarely asked to implement, but worth knowing the name.

@@ -83,11 +83,29 @@ Hit Ratio = cache_hits / (cache_hits + cache_misses)
 
 Improve it by: increasing cache size, tuning TTL, caching at the right granularity, pre-warming.
 
+## Common Cache Failures
+
+### Cache Stampede (Thundering Herd)
+See above. Mitigations: locking, stale-while-revalidate, probabilistic early expiration, request coalescing (single-flight).
+
+### Cache Penetration
+Requests for keys that **don't exist** in the DB bypass the cache and hit the DB every time. Common attack vector.
+- **Solution**: Cache the negative result (`null` with a short TTL), or use a Bloom filter to quickly reject non-existent keys.
+
+### Cache Avalanche
+Many keys expire at the same time (e.g., all set with TTL=3600 at deploy time), causing a sudden burst of DB load.
+- **Solution**: Add jitter to TTL (`base_ttl + random(0, 0.1 * base_ttl)`), staggered warm-up.
+
+### Hot Key
+A single popular key (celebrity user, viral product) overwhelms the cache shard holding it.
+- **Solution**: Replicate the hot key across multiple shards (key suffixing: `key:0`, `key:1`...), use a local in-process cache layer (L1) in front of Redis, or use a CDN for the key.
+
 ## Anti-Patterns
 - **Caching everything**: Wastes memory, increases stale data risk.
 - **No TTL**: Data lives forever, eventually all stale.
 - **Cache as primary store**: If cache goes down, system breaks. Cache should always be a "best effort" layer.
 - **Ignoring cache warming on deploy**: Cold cache after deploy = all traffic hits DB.
+- **Synchronous TTL=0**: Re-fetching on every miss negates caching entirely under high traffic.
 
 ## Possible Interview Questions
 1. "How would you design a caching layer for a social media feed?"

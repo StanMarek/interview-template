@@ -163,8 +163,8 @@ public int[] dijkstra(Map<Integer, List<int[]>> graph, int src, int n) {
     Arrays.fill(dist, Integer.MAX_VALUE);
     dist[src] = 0;
 
-    // {distance, node}
-    PriorityQueue<int[]> pq = new PriorityQueue<>((a, b) -> a[0] - b[0]);
+    // {distance, node} — use Integer.compare to avoid overflow on a[0] - b[0]
+    PriorityQueue<int[]> pq = new PriorityQueue<>((a, b) -> Integer.compare(a[0], b[0]));
     pq.offer(new int[]{0, src});
 
     while (!pq.isEmpty()) {
@@ -242,10 +242,33 @@ class UnionFind {
 
     boolean connected(int x, int y) { return find(x) == find(y); }
 }
-// Nearly O(1) amortized per operation (inverse Ackermann)
+// Path compression + union by rank → O(α(n)) ≈ O(1) amortized (inverse Ackermann).
+// Either optimization alone is O(log n); you want BOTH for the near-constant bound.
+// Union by size works equally well — replace `rank` with subtree size and merge smaller under larger.
 ```
 
-### 7. Grid as Graph (Matrix BFS/DFS)
+### 7. MST — Kruskal vs. Prim
+
+Both build a **minimum spanning tree** on an undirected weighted connected graph.
+
+```java
+// Kruskal — sort edges, add if they don't form a cycle (Union-Find). O(E log E).
+// Best for sparse graphs / when edges are already sorted.
+public int kruskal(int n, int[][] edges) { // edges: {u, v, w}
+    Arrays.sort(edges, (a, b) -> Integer.compare(a[2], b[2]));
+    UnionFind uf = new UnionFind(n);
+    int cost = 0, used = 0;
+    for (int[] e : edges) {
+        if (uf.union(e[0], e[1])) { cost += e[2]; if (++used == n - 1) break; }
+    }
+    return used == n - 1 ? cost : -1; // -1 = disconnected
+}
+
+// Prim — grow tree from a start vertex with a min-heap. O(E log V).
+// Best for dense graphs. Same shape as Dijkstra but relaxes on edge weight, not path sum.
+```
+
+### 8. Grid as Graph (Matrix BFS/DFS)
 
 ```java
 // BFS on a grid — shortest path in a maze
@@ -279,6 +302,97 @@ public int shortestPath(int[][] grid) {
 }
 ```
 
+### 9. 0-1 BFS (Deque Trick)
+
+When edge weights are only **0 or 1**, use an `ArrayDeque`: push-front on weight-0 edges, push-back on weight-1. Runs in **O(V + E)** — a Dijkstra replacement without the log factor.
+
+```java
+Deque<int[]> dq = new ArrayDeque<>();
+dq.offerFirst(new int[]{src, 0});
+while (!dq.isEmpty()) {
+    int[] cur = dq.pollFirst();
+    int u = cur[0], d = cur[1];
+    if (d > dist[u]) continue;
+    for (int[] e : graph.get(u)) { // e = {v, w} with w ∈ {0, 1}
+        int nd = d + e[1];
+        if (nd < dist[e[0]]) {
+            dist[e[0]] = nd;
+            if (e[1] == 0) dq.offerFirst(new int[]{e[0], nd});
+            else           dq.offerLast(new int[]{e[0], nd});
+        }
+    }
+}
+```
+
+### 10. Bidirectional BFS
+
+Search from both source and target, alternating the **smaller frontier** each step. Shrinks branching factor from `b^d` to `2·b^(d/2)` — huge win on Word Ladder-style problems.
+
+### 11. A* Search
+
+Dijkstra + admissible heuristic `h(n)`. Uses priority `f(n) = g(n) + h(n)`. `h` must **never overestimate** the true remaining cost (e.g., Manhattan distance on a grid). Optimal iff heuristic is admissible; consistent heuristic also gives monotone `f`.
+
+### 12. Floyd-Warshall (All-Pairs Shortest Path)
+
+`O(V³)` time, `O(V²)` space. Handles negative edges (no negative cycles). Good for small, dense graphs.
+
+```java
+int[][] dist = new int[n][n];
+for (int[] row : dist) Arrays.fill(row, INF);
+for (int i = 0; i < n; i++) dist[i][i] = 0;
+for (int[] e : edges) dist[e[0]][e[1]] = e[2];
+for (int k = 0; k < n; k++)           // intermediate
+  for (int i = 0; i < n; i++)
+    for (int j = 0; j < n; j++)
+      if (dist[i][k] != INF && dist[k][j] != INF
+          && dist[i][k] + dist[k][j] < dist[i][j])
+        dist[i][j] = dist[i][k] + dist[k][j];
+// Negative cycle iff any dist[i][i] < 0 after the loop.
+```
+
+**Johnson's algorithm** is the sparse alternative: O(V·E + V² log V) using Bellman-Ford reweighting + Dijkstra from every node. Better than Floyd-Warshall when E ≪ V².
+
+### 13. Tarjan's SCC & Bridges / Articulation Points
+
+- **Kosaraju:** two DFS passes (original + transpose). Simple to code.
+- **Tarjan's SCC:** one DFS using `disc[]`/`low[]` and a stack — O(V + E).
+- **Bridges (critical edges):** edge `(u, v)` is a bridge iff `low[v] > disc[u]`. Same DFS skeleton.
+- **Articulation points:** vertex `u` is cut iff (a) root of DFS with ≥ 2 children, or (b) non-root with some child `v` where `low[v] ≥ disc[u]`.
+
+All share the "DFS timestamps + low-link" pattern. Classic problem: **Critical Connections in a Network** (LC 1192, bridges).
+
+### 14. Eulerian vs. Hamiltonian
+
+- **Eulerian path/circuit** (visit every **edge** exactly once): solvable in O(V + E) via Hierholzer's algorithm. Undirected: circuit iff all degrees even; path iff exactly 0 or 2 odd-degree vertices. Directed: every vertex has in-deg = out-deg (circuit), or exactly one start (out − in = 1) and one end (in − out = 1).
+- **Hamiltonian path/cycle** (visit every **vertex** exactly once): **NP-hard**. Use bitmask DP (Held-Karp, `O(2^N · N²)`) for N ≤ ~20.
+
+## Library Shortcuts (JGraphT, Guava)
+
+Interview problems usually require hand-rolled code, but you may be asked "how would you do this at scale?"
+
+```java
+// JGraphT — rich algorithm library
+Graph<Integer, DefaultWeightedEdge> g = new SimpleDirectedWeightedGraph<>(DefaultWeightedEdge.class);
+new DijkstraShortestPath<>(g).getPath(src, dst);
+new BellmanFordShortestPath<>(g).getPath(src, dst);
+new FloydWarshallShortestPaths<>(g);              // all-pairs
+new JohnsonShortestPaths<>(g);                    // all-pairs, sparse
+new AStarShortestPath<>(g, heuristic).getPath(s, t);
+new KosarajuStrongConnectivityInspector<>(g).getStronglyConnectedComponents();
+new GabowStrongConnectivityInspector<>(g);        // Tarjan-family, iterative
+new BiconnectivityInspector<>(g).getBridges();    // + getCutpoints()
+new KruskalMinimumSpanningTree<>(g); new PrimMinimumSpanningTree<>(g);
+new TopologicalOrderIterator<>(g);                // Kahn-based
+new CycleDetector<>(g).detectCycles();
+
+// Guava — lightweight graph modeling (no algorithms beyond traversal)
+MutableGraph<String> g2 = GraphBuilder.directed().build();
+MutableValueGraph<String, Integer> w = ValueGraphBuilder.directed().build();
+MutableNetwork<String, Edge> n = NetworkBuilder.directed().allowsParallelEdges(true).build();
+Traverser.forGraph(g2).breadthFirst(start);       // BFS iterable
+Graphs.transitiveClosure(g2); Graphs.transpose(g2);
+```
+
 ## Common Interview Problems
 
 ### Easy
@@ -295,9 +409,11 @@ public int shortestPath(int[][] grid) {
 
 ### Hard
 - Word Ladder II, Alien Dictionary
-- Shortest Path in a Grid with Obstacles Elimination
+- Shortest Path in a Grid with Obstacles Elimination (0-1 BFS or state-augmented BFS)
 - Critical Connections in a Network (Tarjan's bridges)
-- Reconstruct Itinerary (Eulerian path)
+- Reconstruct Itinerary (Eulerian path — Hierholzer's)
+- Swim in Rising Water (Dijkstra / binary search + BFS)
+- Minimum Cost to Make at Least One Valid Path (0-1 BFS)
 
 ## Tips and Pitfalls
 
@@ -310,3 +426,8 @@ public int shortestPath(int[][] grid) {
 - **Dijkstra doesn't work with negative weights.** Use Bellman-Ford instead.
 - **Multi-source BFS:** Add all sources to the queue initially (e.g., Rotting Oranges, 01 Matrix).
 - **Bidirectional BFS** can drastically reduce search space for shortest-path problems.
+- **0-1 BFS beats Dijkstra** when weights are only 0/1 — O(V+E) with a deque.
+- **Dijkstra priority comparator:** use `Integer.compare(a, b)`, not `a - b` (overflow on large weights).
+- **Algorithm picker:** unweighted → BFS; non-neg weights → Dijkstra; any weights → Bellman-Ford; all-pairs → Floyd-Warshall (dense) or Johnson's (sparse); grid with 0/1 moves → 0-1 BFS.
+- **Hamiltonian path is NP-hard**, Eulerian is polynomial — don't confuse them. If the problem says "visit every node exactly once" and N ≤ 20, think bitmask DP.
+- **Tarjan pattern** (disc/low arrays, DFS stack) solves SCC, bridges, and articulation points with the same skeleton.

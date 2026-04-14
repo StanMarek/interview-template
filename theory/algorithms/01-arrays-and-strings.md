@@ -43,6 +43,35 @@ sb.reverse();
 sb.toString();
 ```
 
+### Modern String APIs (Java 11+)
+
+```java
+s.isBlank();                          // true if empty or only whitespace (Java 11)
+s.strip();                            // Unicode-aware trim (Java 11)
+"ab".repeat(3);                       // "ababab" (Java 11)
+s.lines();                            // Stream<String> split on line terminators (Java 11)
+s.chars();                            // IntStream of char codes (useful for frequency, filtering)
+s.codePoints();                       // IntStream — correct for non-BMP / emoji
+"%s is %d".formatted("x", 5);         // instance-form of String.format (Java 15)
+// Text blocks (Java 15) — multi-line literals, incidental whitespace stripped
+String json = """
+        {"k": "v"}
+        """;
+```
+
+### Arrays ↔ Streams (idiomatic conversions)
+
+```java
+int[] a = IntStream.rangeClosed(1, n).toArray();       // build [1..n]
+int sum = Arrays.stream(nums).sum();                   // also .min/.max/.average/.summaryStatistics()
+int[] sorted = Arrays.stream(nums).sorted().toArray();
+List<Integer> boxed = Arrays.stream(nums).boxed().toList();   // Java 16+ immutable list
+
+// Pitfall: Arrays.asList(int[]) returns List<int[]> of size 1 — use boxed stream or Arrays.stream
+List<Integer> list = List.of(1, 2, 3);                 // immutable, disallows null
+List<Integer> mutable = new ArrayList<>(List.of(1, 2, 3));
+```
+
 ### Time Complexity
 
 | Operation         | Array     | ArrayList | String        | StringBuilder |
@@ -158,6 +187,91 @@ public void sortColors(int[] nums) {
 }
 ```
 
+### 7. Boyer–Moore Majority Vote
+
+O(n) time, O(1) space — finds the element appearing > n/2 times (assumed to exist).
+
+```java
+public int majorityElement(int[] nums) {
+    int candidate = 0, count = 0;
+    for (int n : nums) {
+        if (count == 0) candidate = n;
+        count += (n == candidate) ? 1 : -1;
+    }
+    return candidate;   // verify with second pass if not guaranteed
+}
+```
+
+**When to use:** majority/dominant element problems with O(1) space constraint. Generalizes to "elements appearing > n/3 times" with two candidates.
+
+### 8. Cyclic Sort
+
+When values are in range `[0..n]` or `[1..n]`, place each value at its target index via swaps — O(n) time, O(1) space.
+
+```java
+// Find the missing number in [0..n]
+public int missingNumber(int[] nums) {
+    int i = 0;
+    while (i < nums.length) {
+        if (nums[i] < nums.length && nums[i] != i) swap(nums, i, nums[i]);
+        else i++;
+    }
+    for (int j = 0; j < nums.length; j++) if (nums[j] != j) return j;
+    return nums.length;
+}
+```
+
+**When to use:** "array contains numbers 1..n" with missing/duplicate/first-missing-positive problems requiring O(1) extra space.
+
+### 9. Difference Array (Range Updates)
+
+Apply many range updates `[l, r] += v` in O(1) each, then reconstruct the final array via prefix sum in O(n). Inverse of prefix sum.
+
+```java
+int[] diff = new int[n + 1];
+for (int[] u : updates) {           // u = {l, r, val}
+    diff[u[0]] += u[2];
+    diff[u[1] + 1] -= u[2];
+}
+int[] result = new int[n];
+result[0] = diff[0];
+for (int i = 1; i < n; i++) result[i] = result[i - 1] + diff[i];
+```
+
+**When to use:** many overlapping range updates with a single final query — e.g. "Range Addition", "Car Pooling", "Corporate Flight Bookings".
+
+### 10. Reverse In-Place (Two Pointers)
+
+```java
+public void reverse(int[] a) {
+    for (int lo = 0, hi = a.length - 1; lo < hi; lo++, hi--) swap(a, lo, hi);
+}
+// Rotate array right by k: reverse(0,n-1); reverse(0,k-1); reverse(k,n-1)
+```
+
+### 11. Palindromes — Expand Around Center / Manacher's
+
+Standard interview approach: for each index, expand outward for both odd and even centers — O(n²) time, O(1) space.
+
+```java
+public String longestPalindrome(String s) {
+    int start = 0, maxLen = 0;
+    for (int i = 0; i < s.length(); i++) {
+        int l1 = expand(s, i, i);       // odd length
+        int l2 = expand(s, i, i + 1);   // even length
+        int len = Math.max(l1, l2);
+        if (len > maxLen) { maxLen = len; start = i - (len - 1) / 2; }
+    }
+    return s.substring(start, start + maxLen);
+}
+private int expand(String s, int l, int r) {
+    while (l >= 0 && r < s.length() && s.charAt(l) == s.charAt(r)) { l--; r++; }
+    return r - l - 1;
+}
+```
+
+**Manacher's algorithm** solves longest palindromic substring in O(n) but is rarely expected in interviews — mention it as the optimal bound; expand-around-center is usually accepted.
+
 ## Common Interview Problems by Category
 
 ### Easy
@@ -185,3 +299,7 @@ public void sortColors(int[] nums) {
 - **Sorting as preprocessing:** Many problems become simpler after sorting. Ask yourself: "Would sorting help here?"
 - **Hashing vs. sorting:** HashMap gives O(n) but uses O(n) space; sorting gives O(n log n) with O(1) space.
 - **Character arrays for fixed alphabet:** `int[26]` or `int[128]` is faster and cleaner than `HashMap<Character, Integer>`.
+- **`Arrays.asList` vs `List.of`:** `Arrays.asList(arr)` on `int[]` yields `List<int[]>` (single element!) — always use `Arrays.stream(arr).boxed().toList()` to box primitives. `List.of(...)` returns an immutable list and throws on `null`.
+- **`toList()` vs `Collectors.toList()`:** prefer `Stream.toList()` (Java 16+) — it's immutable and shorter. Use `collect(Collectors.toCollection(ArrayList::new))` if you need mutability.
+- **Unicode correctness:** `s.charAt(i)` returns a UTF-16 code unit; for emoji / supplementary characters iterate via `s.codePoints()`.
+- **Non-printable / ASCII assumptions:** verify the problem's alphabet — `int[26]` assumes lowercase-only; prefer `int[128]` for general ASCII.

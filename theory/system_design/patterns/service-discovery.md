@@ -39,9 +39,12 @@ A database of available service instances with their network locations and healt
 |------|------|-------|
 | etcd | CP (Raft consensus) | Key-value store, Kubernetes backing store |
 | Consul | CP (Raft) | Service mesh + DNS + KV + health checks |
-| ZooKeeper | CP (ZAB) | Mature, complex, used by Kafka/Hadoop |
-| Eureka | AP | Netflix, peer-to-peer replication |
-| Kubernetes | Built-in | Services + Endpoints + CoreDNS |
+| ZooKeeper | CP (ZAB) | Mature, complex; usage declining (Kafka 4.0 removed it in 2025 in favor of KRaft) |
+| Eureka | AP | Netflix; in maintenance mode — Spring Cloud dropped Netflix integrations in 2023, Eureka 2.x was abandoned. Avoid for greenfield projects |
+| Nacos | AP / CP (configurable) | Alibaba; service discovery + config; popular in Spring Cloud Alibaba |
+| Kubernetes | Built-in | Services + Endpoints/EndpointSlices + CoreDNS — the default in K8s-native architectures |
+
+In modern (2025-2026) cloud-native stacks, **Kubernetes Services + CoreDNS** (often paired with a service mesh like Istio/Linkerd/Cilium) is the dominant pattern. Standalone registries like Eureka/Consul are mostly seen in legacy or hybrid VM/Kubernetes environments.
 
 ## Possible Interview Questions
 1. "How do microservices find each other?"

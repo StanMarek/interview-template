@@ -22,7 +22,7 @@ SET resource_name my_random_value NX PX 30000
 - `PX 30000`: Auto-expire after 30 seconds (prevents deadlock if holder crashes)
 - `my_random_value`: Unique per acquisition. Only delete the lock if value matches (prevent accidental release by another process).
 
-**Redlock** (multi-node): Acquire the lock on N/2 + 1 Redis instances. If majority acquired within timeout, lock is held. Controversial — Martin Kleppmann argued it's unsafe under certain clock skew and GC pause scenarios.
+**Redlock** (multi-node): Acquire the lock on N/2 + 1 independent Redis instances. If majority acquired within timeout, lock is held. **Controversial** — Martin Kleppmann (2016) showed it's unsafe under clock skew, GC pauses, and network delays, because Redlock relies on wall-clock TTLs and lacks fencing tokens. antirez (Redis creator) defended it, but the consensus in 2025 is: **for correctness-critical workloads use a CP system (etcd/ZooKeeper) with fencing tokens; for efficiency-only locking (e.g., "don't run this job twice in 5 minutes") single-instance Redis with `SET NX PX` is sufficient.**
 
 ### ZooKeeper-Based
 Create an ephemeral sequential node under a lock path. If your node has the lowest sequence number, you have the lock. If not, watch the next-lowest node. When it's deleted, check again.

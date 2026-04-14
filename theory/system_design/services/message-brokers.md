@@ -12,6 +12,15 @@ A distributed event streaming platform. It's an append-only, partitioned, replic
 - **Producer**: Publishes messages to a topic. Can specify partition key for ordering.
 - **Consumer Group**: A group of consumers that together consume all partitions of a topic. Each partition is assigned to exactly one consumer in the group.
 - **Offset**: Each message in a partition has a sequential offset. Consumers track their position by offset.
+- **Controller (KRaft)**: Internal Raft-based metadata quorum (replaces ZooKeeper).
+
+### KRaft (No More ZooKeeper) — INTERVIEW-RELEVANT
+ZooKeeper was Kafka's metadata store for ~10 years. In Kafka **3.3 (2022)** KRaft mode went GA; **Kafka 3.5+** deprecated ZooKeeper; **Kafka 4.0 (March 2025)** removed ZooKeeper entirely — KRaft is now the only supported mode. Key benefits:
+- Single binary (no separate ZK ensemble to operate)
+- Faster controller failover (seconds vs minutes)
+- Supports millions of partitions per cluster (vs ~200K ceiling with ZK)
+- Simpler security model (one auth/TLS surface)
+Migration path for 3.x clusters: dual-write phase → KRaft-only. Greenfield clusters in 2025+ should always use KRaft.
 
 ### Key Properties
 - **Ordering**: Guaranteed within a partition (not across partitions)
@@ -101,3 +110,4 @@ A traditional message broker implementing AMQP (Advanced Message Queuing Protoco
 6. "What happens when a Kafka broker goes down?"
 7. "How would you implement exactly-once processing with Kafka?"
 8. "Compare managed services (SQS, Google Pub/Sub) vs self-managed Kafka."
+9. "What is KRaft, and why did Kafka remove ZooKeeper?"

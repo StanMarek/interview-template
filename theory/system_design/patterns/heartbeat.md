@@ -24,7 +24,17 @@ A monitor actively pings each node. Three levels:
 Instead of binary alive/dead, compute a **suspicion level** (phi) based on the distribution of heartbeat intervals. Higher phi = more likely dead. Used by Akka and Cassandra.
 
 ## Gossip Protocol
-In peer-to-peer systems, nodes gossip about each other's health. Each node periodically picks a random peer and exchanges membership information. Information propagates exponentially (O(log N) rounds to reach all nodes).
+In peer-to-peer systems, nodes gossip about each other's health. Each node periodically picks a random peer and exchanges membership information. Information propagates exponentially (O(log N) rounds to reach all nodes). Scales to thousands of nodes without a central coordinator.
+
+**Used by**: Cassandra, Consul (serf), HashiCorp nomad, Redis Cluster, Riak, DynamoDB (internally).
+
+### SWIM Protocol
+Scalable Weakly-consistent Infection-style Process group Membership. Refinement of gossip that decouples failure detection from membership dissemination:
+1. **Ping**: Node A pings random node B.
+2. **Indirect ping**: If B doesn't respond, A asks K other nodes to ping B (rules out local network issue).
+3. **Dissemination**: Membership changes piggyback on normal pings.
+
+Used by HashiCorp Serf, Consul, and many service meshes.
 
 ## Implementation in Kubernetes
 - **livenessProbe**: If fails, kubelet restarts the container

@@ -58,13 +58,19 @@ In practice, these often overlap. An Nginx reverse proxy can act as a basic API 
 ## Real-World Implementations
 | Tool | Type | Notes |
 |------|------|-------|
-| Kong | Open-source | Plugin-based, Lua/Nginx |
-| AWS API Gateway | Managed | REST, HTTP, WebSocket APIs |
+| Kong | Open-source | Plugin-based, Nginx/OpenResty under the hood |
+| AWS API Gateway | Managed | REST, HTTP (cheaper, lower-latency), WebSocket APIs |
 | Azure API Management | Managed | Policy-based, developer portal |
-| GCP API Gateway | Managed | OpenAPI/Swagger support |
-| Envoy | Open-source proxy | Used as gateway in service meshes (Istio) |
-| Nginx | Reverse proxy | Can act as a simple API gateway |
-| Traefik | Cloud-native | Auto-discovery of services |
+| GCP API Gateway / Apigee | Managed | OpenAPI/Swagger support |
+| Envoy | Open-source proxy | Used as gateway in service meshes (Istio) and standalone (Gloo, Emissary) |
+| Nginx / OpenResty | Reverse proxy | Can act as a simple API gateway |
+| Traefik | Cloud-native | Auto-discovery of services, K8s-native |
+| **Kubernetes Gateway API** | Spec (GA 2023) | Successor to Ingress; richer L4/L7 routing, implemented by Istio, Envoy Gateway, Contour, Kong, etc. |
+
+### Gateway vs Ingress Controller vs Service Mesh
+- **Ingress / Gateway API**: North-south traffic (external → cluster). Kubernetes Gateway API is the modern standard, superseding the older Ingress resource.
+- **API Gateway**: Business-logic-aware routing, auth, rate limiting, API product lifecycle (versioning, quotas, billing).
+- **Service Mesh**: East-west traffic (service-to-service inside the cluster). Overlap exists — Envoy can play all three roles.
 
 ## Possible Interview Questions
 1. "Why not have the client call microservices directly?"

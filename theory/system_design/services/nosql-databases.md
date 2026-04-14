@@ -23,10 +23,10 @@ Store semi-structured documents (JSON/BSON). Documents can have nested structure
 
 | Database | Notes |
 |----------|-------|
-| MongoDB | Most popular, rich query language, aggregation pipeline |
+| MongoDB | Most popular, rich query language, aggregation pipeline. MongoDB 7 (2023) added queryable encryption; MongoDB 8 (Oct 2024) brought time-series/vector improvements and ~30% throughput gains. Relicensed from AGPL to SSPL in 2018 — still not OSI-approved. |
 | CouchDB | AP, multi-master replication, HTTP/REST API |
 | Firestore | Managed, real-time sync, mobile-first |
-| Elasticsearch | Document store + full-text search (see Search Engines) |
+| Elasticsearch / OpenSearch | Document store + full-text search (see Search Engines) |
 
 **Best for**: Content management, catalogs, user profiles, event logging. Anything with variable schemas or nested data.
 **Access pattern**: Query by any field, nested field access, partial updates.
@@ -36,9 +36,9 @@ Data organized by column families. Each row can have different columns. Optimize
 
 | Database | Notes |
 |----------|-------|
-| Cassandra | AP, leaderless, tunable consistency, linear write scaling |
+| Cassandra | AP, leaderless, tunable consistency, linear write scaling. Cassandra 5.0 (Sept 2024) added vector search (SAI indexes), storage-attached indexes, and trie memtables. |
 | HBase | CP, built on HDFS, strong consistency, Hadoop ecosystem |
-| ScyllaDB | Cassandra-compatible, C++ (faster) |
+| ScyllaDB | Cassandra-compatible, C++ shard-per-core (faster). ScyllaDB 6+ replaced internal Gossip with Raft and LWT group0. |
 | Bigtable | Google's managed, original inspiration for Cassandra/HBase |
 
 **Data model**: `(row_key, column_family:column_name, timestamp) → value`

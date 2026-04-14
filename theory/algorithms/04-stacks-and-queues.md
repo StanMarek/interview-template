@@ -21,19 +21,19 @@ stack.size();
 Stack<Integer> legacyStack = new Stack<>(); // synchronized, slower
 ```
 
-> **Why ArrayDeque over Stack?** Java's `Stack` class extends `Vector`, making all operations synchronized (unnecessary overhead). `ArrayDeque` is faster, not synchronized, and is the recommended implementation.
+> **Why ArrayDeque over Stack?** Java's `Stack` class extends `Vector`, making all operations synchronized (unnecessary overhead). `ArrayDeque` is faster, not synchronized, and is the recommended implementation. Caveat: `ArrayDeque` does **not** allow `null` elements (throws NPE) — use a sentinel if you need to represent absence.
 
 ### Queue (FIFO — First In, First Out)
 
 ```java
-// Standard Queue
-Queue<Integer> queue = new LinkedList<>();
-queue.offer(1);         // enqueue — returns false if full (vs add which throws)
+// Standard Queue — prefer ArrayDeque over LinkedList (contiguous memory, better cache locality)
+Queue<Integer> queue = new ArrayDeque<>();
+queue.offer(1);         // enqueue — returns false if bounded queue is full (vs add which throws)
 queue.poll();           // dequeue — returns null if empty (vs remove which throws)
 queue.peek();           // view front — returns null if empty
 
-// ArrayDeque as Queue (faster than LinkedList for most cases)
-Queue<Integer> queue = new ArrayDeque<>();
+// LinkedList also implements Queue — only pick it if you need nulls or List+Queue dual role
+Queue<Integer> ll = new LinkedList<>();
 
 // Deque — Double-ended queue (can act as both stack and queue)
 Deque<Integer> deque = new ArrayDeque<>();
@@ -41,6 +41,8 @@ deque.offerFirst(1);    deque.offerLast(2);
 deque.pollFirst();      deque.pollLast();
 deque.peekFirst();      deque.peekLast();
 ```
+
+> **Java 21+ `SequencedCollection` (JEP 431):** `Deque` now extends `SequencedCollection`, so you also get `getFirst()`, `getLast()`, `addFirst()`, `addLast()`, `removeFirst()`, `removeLast()`, and a `reversed()` view. These throw `NoSuchElementException` on empty collections (unlike `peekFirst`/`pollFirst` which return null). Same uniform API applies to `List`, `LinkedHashSet`, `NavigableSet`.
 
 ### Priority Queue (Min-Heap by default)
 
@@ -107,7 +109,7 @@ public boolean isValid(String s) {
         if (map.containsValue(c)) {
             stack.push(c);
         } else if (map.containsKey(c)) {
-            if (stack.isEmpty() || stack.pop() != map.get(c)) return false;
+            if (stack.isEmpty() || !stack.pop().equals(map.get(c))) return false; // .equals, not !=
         }
     }
     return stack.isEmpty();
@@ -163,7 +165,7 @@ class MinStack {
 
 ### 5. Largest Rectangle in Histogram
 
-A classic monotonic stack problem.
+Classic monotonic (increasing) stack problem. Trick: append a sentinel `0` so the stack fully drains at the end. For each popped bar, it is the *shortest* bar across the rectangle; width spans from the new stack top (exclusive) to the current index (exclusive).
 
 ```java
 public int largestRectangleArea(int[] heights) {
@@ -183,6 +185,68 @@ public int largestRectangleArea(int[] heights) {
 }
 ```
 
+### 6. Trapping Rain Water (Stack)
+
+Monotonic decreasing stack of indices. When a taller bar arrives, pop the bottom and compute horizontal water slab between the new top (left wall) and current bar (right wall).
+
+```java
+public int trap(int[] height) {
+    Deque<Integer> stack = new ArrayDeque<>();
+    int water = 0;
+    for (int i = 0; i < height.length; i++) {
+        while (!stack.isEmpty() && height[i] > height[stack.peek()]) {
+            int bottom = stack.pop();
+            if (stack.isEmpty()) break;
+            int left = stack.peek();
+            int w = i - left - 1;
+            int h = Math.min(height[left], height[i]) - height[bottom];
+            water += w * h;
+        }
+        stack.push(i);
+    }
+    return water;
+}
+```
+
+### 7. Evaluate Reverse Polish Notation (Postfix)
+
+```java
+public int evalRPN(String[] tokens) {
+    Deque<Integer> stack = new ArrayDeque<>();
+    for (String t : tokens) {
+        switch (t) {
+            case "+", "-", "*", "/" -> {
+                int b = stack.pop(), a = stack.pop();
+                stack.push(switch (t) {
+                    case "+" -> a + b;
+                    case "-" -> a - b;
+                    case "*" -> a * b;
+                    default  -> a / b;
+                });
+            }
+            default -> stack.push(Integer.parseInt(t));
+        }
+    }
+    return stack.pop();
+}
+```
+
+### 8. Shunting-Yard (Infix → Postfix)
+
+Dijkstra's algorithm for converting infix to RPN using an operator stack and output queue. Pop operators whose precedence ≥ the incoming operator's (strict `>` for right-associative ops like `^`).
+
+```java
+// Sketch: output list + operator stack
+// - Operand: append to output
+// - Operator o1: while top o2 has precedence >= o1 (> for right-assoc), pop to output; push o1
+// - '(': push. ')': pop until '('.
+// - End: drain remaining operators to output.
+```
+
+### 9. Min Stack — Alternate (Two-Stack)
+
+Keep a parallel `minStack`; on push, push `min(val, minStack.peek())`. Avoids per-node `int[]` wrapper — handy when interviewer asks for O(1) extra memory *per push when no new minimum*.
+
 ## Essential Queue Patterns
 
 ### 1. BFS with Queue
@@ -193,7 +257,7 @@ public List<List<Integer>> levelOrder(TreeNode root) {
     List<List<Integer>> result = new ArrayList<>();
     if (root == null) return result;
 
-    Queue<TreeNode> queue = new LinkedList<>();
+    Queue<TreeNode> queue = new ArrayDeque<>();
     queue.offer(root);
 
     while (!queue.isEmpty()) {
@@ -236,7 +300,30 @@ public int[] maxSlidingWindow(int[] nums, int k) {
 }
 ```
 
-### 3. Implement Queue using Stacks
+### 3. Circular Queue (Ring Buffer)
+
+Fixed-capacity FIFO over an array using `head`, `tail`, and `size` (or just two indices with a sentinel slot). O(1) enqueue/dequeue, no shifting.
+
+```java
+class MyCircularQueue {
+    int[] buf; int head = 0, tail = -1, size = 0, cap;
+    public MyCircularQueue(int k) { buf = new int[k]; cap = k; }
+    public boolean enQueue(int v) {
+        if (size == cap) return false;
+        tail = (tail + 1) % cap; buf[tail] = v; size++; return true;
+    }
+    public boolean deQueue() {
+        if (size == 0) return false;
+        head = (head + 1) % cap; size--; return true;
+    }
+    public int Front() { return size == 0 ? -1 : buf[head]; }
+    public int Rear()  { return size == 0 ? -1 : buf[tail]; }
+    public boolean isEmpty() { return size == 0; }
+    public boolean isFull()  { return size == cap; }
+}
+```
+
+### 4. Implement Queue using Stacks
 
 ```java
 class MyQueue {
@@ -287,7 +374,9 @@ class MyQueue {
 
 - **Use `ArrayDeque`** over `Stack` and `LinkedList` — it's faster for both stack and queue operations.
 - **`poll()` vs `pop()`/`remove()`:** `poll()` returns null when empty; `pop()`/`remove()` throw exceptions. In interviews, `poll()` with a null check is safer.
-- **Monotonic stack direction:** Increasing stack finds *next smaller*, decreasing stack finds *next greater*. Draw a few examples to confirm.
+- **Monotonic stack direction (left-to-right scan):** A *decreasing* stack (top is smallest) pops when a larger element arrives → finds **next greater**. An *increasing* stack (top is largest) pops when a smaller arrives → finds **next smaller**. The popped element is the one being *resolved* for its neighbor. Draw two examples to confirm before coding.
+- **`ArrayDeque` disallows nulls** — throws `NullPointerException` on `offer(null)` / `push(null)`. If you must store absence, use `Optional` or a sentinel, or fall back to `LinkedList`.
+- **Java 21+ `getFirst`/`getLast` throw on empty** (unlike `peek`/`peekFirst` which return null). Pick the right variant for your empty-handling style.
 - **BFS always uses a queue.** DFS uses a stack (or recursion, which is an implicit stack).
 - **Capture `queue.size()` before the inner loop** in BFS level-order — the queue grows during the loop.
 - **Stack for DFS:** Any recursive DFS can be converted to iterative using an explicit stack. Interviewers sometimes ask for this.

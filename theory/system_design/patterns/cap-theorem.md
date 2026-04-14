@@ -11,13 +11,15 @@ Since network partitions are inevitable in distributed systems, the real choice 
 
 ### CP Systems
 During partition, reject requests to partitioned nodes to maintain consistency.
-- Examples: HBase, MongoDB (default), ZooKeeper, etcd, Redis Cluster
+- Examples: HBase, MongoDB (default since 4.0), ZooKeeper, etcd, Spanner, CockroachDB, TiDB
 - Use when: Banking, inventory, anything where stale reads are dangerous
 
 ### AP Systems
 During partition, serve requests from any reachable node, even if data might be stale.
-- Examples: Cassandra, DynamoDB, CouchDB, DNS
+- Examples: Cassandra, DynamoDB, CouchDB, DNS, **Redis Cluster**
 - Use when: Social media feeds, shopping carts, session stores — eventual consistency is acceptable
+
+> **Redis Cluster note:** often misfiled as "CP-ish with `WAIT`". It is **not** CP/linearizable. Default replication is asynchronous, failover uses a majority-voted election that can still lose acknowledged writes, and `WAIT n timeout` only blocks until `n` replicas acknowledge — it provides **no** linearizability across partitions or failover windows. Treat it as an AP store with tunable durability, not as a CP database.
 
 ### Important Nuances
 - CAP is about behavior **during a partition**. When the network is healthy, you can have all three.
@@ -76,6 +78,14 @@ Once a user reads a value, they will never see an older value in subsequent read
 
 ### ZAB (ZooKeeper Atomic Broadcast)
 - Similar to Raft but predates it. Used exclusively by ZooKeeper.
+
+### Multi-Paxos / EPaxos / Viewstamped Replication
+Variants that extend basic Paxos for practical use. EPaxos removes the leader bottleneck by allowing any replica to propose, at the cost of more complex conflict detection.
+
+## Common CAP Misinterpretations
+- "CAP forces you to pick 2 of 3" — wrong. When there's no partition (most of the time), you can have C, A, and P. The trade-off applies **only during a partition**.
+- "A" in CAP ≠ "highly available." CAP availability means *every* non-failed node returns a response; a system can have 99.999% uptime and still be CP in CAP terms.
+- Latency/performance is not in CAP at all. Use PACELC to reason about normal-case trade-offs.
 
 ## Possible Interview Questions
 1. "Explain the CAP theorem. Can you have all three?"

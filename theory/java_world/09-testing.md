@@ -400,9 +400,82 @@ void shouldBeIdempotent(RepetitionInfo info) {
 void pendingFeature() { }
 ```
 
+### JUnit 5.11+ Highlights (Current on Jupiter 5.14 / JUnit 6)
+
+The JUnit team ships roughly one minor release per quarter. Knowing the recent additions is a strong senior signal — most codebases still rely on pre-5.10 idioms.
+
+| Version       | Notable additions                                                                                     |
+|---------------|-------------------------------------------------------------------------------------------------------|
+| 5.11 (2024)   | `@AutoClose` on fields, stricter field/method visibility semantics, `@TempDir` cleanup hardening      |
+| 5.12 (Feb 2025)| Thread dumps on test timeout, parameterised test validation, reduced thread contention for parallel runs |
+| 5.13 (2025)   | `@ClassTemplate` / `@ParameterizedClass` — stable API for parameterising whole classes; Kotlin `Sequence` support |
+| 5.14 / 6.0    | Baseline Java 17, new `ConsumerArgumentsProvider`, richer `@ParameterizedClass` lifecycle             |
+
+```java
+// @AutoClose — replaces manual @AfterEach close()
+class KafkaConsumerTest {
+    @AutoClose
+    Consumer<String, String> consumer = new KafkaConsumer<>(props());
+}
+
+// @ClassTemplate / @ParameterizedClass — parameterise the whole test class, not just methods
+@ParameterizedClass
+@ValueSource(strings = {"MYSQL", "POSTGRES"})
+class DialectTest {
+    final String dialect;
+    DialectTest(String dialect) { this.dialect = dialect; }
+
+    @Test void shouldQuoteIdentifiers() { /* reuses `dialect` */ }
+    @Test void shouldFormatBoolean()     { /* reuses `dialect` */ }
+}
+```
+
+### Parallel Test Execution
+
+JUnit 5 can run tests concurrently on the same JVM. This can cut suite time significantly but exposes shared mutable state immediately.
+
+Enable via `src/test/resources/junit-platform.properties`:
+
+```properties
+junit.jupiter.execution.parallel.enabled=true
+junit.jupiter.execution.parallel.mode.default=same_thread
+junit.jupiter.execution.parallel.mode.classes.default=concurrent
+junit.jupiter.execution.parallel.config.strategy=dynamic
+```
+
+```java
+// Opt-in at class / method level
+@Execution(ExecutionMode.CONCURRENT)
+class FastUnitTest { }
+
+// Declare shared resources to serialize access
+@ResourceLock(Resources.SYSTEM_PROPERTIES)
+@Test
+void mutatesSystemProps() { System.setProperty("x", "y"); }
+
+// Custom resource — two tests touching the same DB table run sequentially
+@ResourceLock("orders-table")
+@Test
+void truncatesOrdersTable() { }
+```
+
+Parallel execution is safe for pure unit tests, risky for Spring context tests (shared context, H2, static state), and usually turned **off** for integration tests that share Testcontainers state unless you lock properly.
+
 ---
 
 ## 3. Mockito
+
+### Mockito 5.x — What Changed vs. Mockito 3/4
+
+Mockito 5 (2023) is the current baseline and what you should default to in 2026.
+
+| Change                               | Impact                                                                                   |
+|--------------------------------------|------------------------------------------------------------------------------------------|
+| Default `MockMaker` = `mockito-inline` | `mockStatic`, `mockConstruction`, final classes, and `final` methods work out of the box — **no more `mockito-inline` dependency**. The legacy `mockito-core` subclass mock maker still ships as `mockito-subclass`. |
+| Minimum JDK 11 (5.x), 17 (current 5.15+) | Old `PowerMock` / `PowerMockito` hacks are gone for good — just use built-in static mocking. |
+| `STRICT_STUBS` is the default        | Unused stubs throw `UnnecessaryStubbingException` at the end of the test.                |
+| Mocking Java records works natively  | Records are final — Mockito 5 handles them via the inline mock maker.                    |
+| PowerMock is **deprecated / unmaintained** | Do not introduce PowerMock in new code. Refactor to constructor injection + `mockStatic`. |
 
 ### Core Annotations
 
@@ -559,9 +632,59 @@ void shouldApplyDiscountForPremiumCustomer() {
 }
 ```
 
+### Strict Stubbing (Default since Mockito 3.x, Stricter in 5.x)
+
+`STRICT_STUBS` is the default when using `MockitoExtension`. It fails the test if:
+
+- A stubbed method is **never called** (`UnnecessaryStubbingException`).
+- `verify()` is called with different arguments than what was actually invoked (`PotentialStubbingProblem`).
+
+```java
+@ExtendWith(MockitoExtension.class)
+@MockitoSettings(strictness = Strictness.STRICT_STUBS)  // explicit; same as default
+class StrictTest {
+    @Mock OrderRepository repo;
+
+    @Test
+    void shouldOnlyStubWhatYouUse() {
+        when(repo.findById("A")).thenReturn(Optional.of(orderA));  // used
+        when(repo.findById("B")).thenReturn(Optional.of(orderB));  // UNUSED -> fails the test
+        assertThat(service.process("A")).isNotNull();
+    }
+}
+
+// Escape hatch: make a SINGLE stubbing lenient
+lenient().when(repo.findAll()).thenReturn(List.of());
+
+// Escape hatch: make the whole class lenient (avoid unless really needed)
+@MockitoSettings(strictness = Strictness.LENIENT)
+class LegacyTest { }
+```
+
+Strict stubbing catches two real bugs: dead test setup that drifts away from production code, and verification against the wrong argument (`verify(repo).save(wrongArg)`).
+
+### Mocking Java Records
+
+Records are `final`, but Mockito 5's inline MockMaker handles them transparently:
+
+```java
+public record PricingRequest(String sku, int quantity, Currency currency) { }
+
+@Test
+void shouldMockRecord() {
+    PricingRequest mock = mock(PricingRequest.class);
+    when(mock.sku()).thenReturn("WIDGET-01");
+    when(mock.quantity()).thenReturn(10);
+
+    assertThat(service.price(mock)).isEqualTo(new BigDecimal("99.90"));
+}
+```
+
+In practice, prefer constructing the record directly (`new PricingRequest("WIDGET-01", 10, USD)`) — records are value objects and cheap to build. Mock them only when one accessor is expensive or when wiring up a complex fixture.
+
 ### Mocking Static Methods
 
-Since Mockito 3.4+, you can mock static methods using `mockStatic`:
+Since Mockito 3.4+ (and default in Mockito 5), you can mock static methods using `mockStatic`:
 
 ```java
 @Test
@@ -653,13 +776,164 @@ class PaymentServiceTest {
 
 ---
 
-## 4. Testcontainers
+## 4. AssertJ
+
+### Why AssertJ over JUnit's `Assertions` / Hamcrest
+
+- **Fluent, type-aware chains:** `assertThat(list).hasSize(3).contains("A").doesNotContain("Z")`.
+- **Better failure messages:** AssertJ reports both expected and actual with descriptions.
+- **Rich collection / object assertions** that make deep-object comparison trivial.
+- **One consistent API** — no juggling JUnit `assertEquals` vs Hamcrest `assertThat(x, is(...))`.
+
+### Everyday Assertions
+
+```java
+// Strings
+assertThat("Hello, World").startsWith("Hello").endsWith("World").contains(",")
+    .hasSize(12).matches("[A-Za-z, ]+");
+
+// Numbers
+assertThat(computed).isEqualTo(expected);
+assertThat(price).isBetween(new BigDecimal("9.99"), new BigDecimal("10.01"));
+assertThat(ratio).isCloseTo(0.3333, within(0.001));
+assertThat(tax).isEqualByComparingTo(new BigDecimal("5.00"));  // BigDecimal-safe
+
+// Collections
+assertThat(orders).hasSize(3)
+    .extracting(Order::status)
+    .containsExactly(PENDING, PAID, SHIPPED);
+
+assertThat(orders).filteredOn(o -> o.total().compareTo(BigDecimal.TEN) > 0)
+    .hasSize(2);
+
+assertThat(map).containsEntry("env", "prod").containsKeys("region", "zone");
+
+// Optional
+assertThat(maybeUser).isPresent().get().extracting(User::email).isEqualTo("a@b.com");
+
+// Exceptions (fluent alternative to assertThrows)
+assertThatThrownBy(() -> service.deleteUser("unknown"))
+    .isInstanceOf(UserNotFoundException.class)
+    .hasMessageContaining("unknown")
+    .hasNoCause();
+
+assertThatExceptionOfType(ValidationException.class)
+    .isThrownBy(() -> validator.validate(bad))
+    .withMessageMatching(".*invalid email.*");
+
+// Dates / Times
+assertThat(event.timestamp()).isCloseTo(Instant.now(), within(2, ChronoUnit.SECONDS));
+assertThat(dueDate).isAfter(today).isBefore(today.plusDays(30));
+```
+
+### Soft Assertions
+
+By default a failing assertion aborts the test — subsequent assertions don't run. Soft assertions collect all failures and report them together:
+
+```java
+@Test
+void shouldMapDtoAllFields() {
+    var dto = mapper.toDto(entity);
+
+    SoftAssertions.assertSoftly(softly -> {
+        softly.assertThat(dto.id()).isEqualTo("42");
+        softly.assertThat(dto.name()).isEqualTo("Alice");
+        softly.assertThat(dto.email()).isEqualTo("alice@x.com");
+        softly.assertThat(dto.roles()).containsExactly("USER");
+    });
+}
+
+// Or as a JUnit extension — auto-flushes at end of test
+@ExtendWith(SoftAssertionsExtension.class)
+class DtoMappingTest {
+    @Test void shouldMap(@InjectSoftAssertions SoftAssertions softly) { /* ... */ }
+}
+```
+
+### Recursive Comparison
+
+The killer feature for deep object graphs (DTOs, aggregates, event payloads). No more hand-writing equals or comparing field-by-field.
+
+```java
+// Compare two objects field-by-field, recursively
+assertThat(actualOrder)
+    .usingRecursiveComparison()
+    .isEqualTo(expectedOrder);
+
+// Ignore volatile fields (IDs, timestamps)
+assertThat(actual)
+    .usingRecursiveComparison()
+    .ignoringFields("id", "createdAt", "updatedAt")
+    .ignoringFieldsMatchingRegexes(".*\\.id$")
+    .ignoringFieldsOfTypes(Instant.class, UUID.class)
+    .isEqualTo(expected);
+
+// Custom comparator for one type (e.g. BigDecimal numeric equality)
+assertThat(actual)
+    .usingRecursiveComparison()
+    .withEqualsForType(BigDecimal::compareTo, BigDecimal.class)
+    .isEqualTo(expected);
+```
+
+Works with Java records out of the box. This is the preferred way to assert on complex DTOs returned by mappers, Jackson deserialisation, or JPA.
+
+### Custom Assertions for Domain Types
+
+For domain types used in hundreds of tests, write a custom assertion class:
+
+```java
+public class OrderAssert extends AbstractAssert<OrderAssert, Order> {
+    public OrderAssert(Order actual) { super(actual, OrderAssert.class); }
+
+    public static OrderAssert assertThat(Order actual) { return new OrderAssert(actual); }
+
+    public OrderAssert isPaid() {
+        isNotNull();
+        if (actual.status() != OrderStatus.PAID) {
+            failWithMessage("Expected order <%s> to be PAID but was <%s>",
+                            actual.id(), actual.status());
+        }
+        return this;
+    }
+
+    public OrderAssert hasTotal(BigDecimal expected) {
+        isNotNull();
+        if (actual.total().compareTo(expected) != 0) {
+            failWithMessage("Expected total <%s>, was <%s>", expected, actual.total());
+        }
+        return this;
+    }
+}
+
+// Usage
+OrderAssert.assertThat(order).isPaid().hasTotal(new BigDecimal("99.99"));
+```
+
+This reads like domain language and removes boilerplate. Autogenerate them with the AssertJ assertions generator if you have many domain types.
+
+---
+
+## 5. Testcontainers
 
 ### Core Concept
 
 Testcontainers provides lightweight, disposable Docker containers for integration testing. Containers start before tests and are automatically cleaned up after, ensuring a fresh state for each test run.
 
 **Why not H2?** In-memory databases like H2 don't support all features of your production database (window functions, JSON operators, extensions). Testcontainers lets you test against the exact same database engine you deploy to production.
+
+### Available Modules (Commonly Used in 2026)
+
+Testcontainers ships first-class modules for most infrastructure you encounter. Don't hand-roll a `GenericContainer` when a module exists — modules expose typed helper methods, sensible defaults, and correct wait strategies.
+
+| Module                      | Typical use                                        |
+|-----------------------------|----------------------------------------------------|
+| `postgresql`, `mysql`, `mariadb`, `oracle-free`, `mssqlserver` | Relational database ITs |
+| `kafka`, `redpanda`, `confluent-platform` | Kafka producers/consumers        |
+| `mongodb`, `cassandra`, `elasticsearch`, `neo4j` | NoSQL ITs                  |
+| `localstack`                | AWS (S3, SQS, SNS, DynamoDB, Lambda) — requires `LOCALSTACK_AUTH_TOKEN` since March 2026 |
+| `rabbitmq`, `pulsar`        | Message brokers                                    |
+| `k3s`, `vault`, `consul`    | Infrastructure / platform testing                  |
+| `wiremock` (community module)| WireMock-in-a-container with `@ServiceConnection` support |
 
 ### Database Testing
 
@@ -814,9 +1088,82 @@ class OrderServiceIT extends AbstractIntegrationTest {
 
 The JVM shutdown hook in Testcontainers (Ryuk) automatically cleans up containers when the JVM exits.
 
+### Spring Boot `@ServiceConnection` (Spring Boot 3.1+)
+
+Spring Boot 3.1+ ships first-class Testcontainers support: annotate a container with `@ServiceConnection` and Spring wires the connection details automatically. No more `@DynamicPropertySource` boilerplate.
+
+```java
+@SpringBootTest
+@Testcontainers
+class OrderServiceIT {
+
+    @Container
+    @ServiceConnection                            // Spring reads JDBC URL, user, password
+    static PostgreSQLContainer<?> postgres =
+        new PostgreSQLContainer<>("postgres:16-alpine");
+
+    @Container
+    @ServiceConnection                            // Spring wires bootstrap-servers
+    static KafkaContainer kafka =
+        new KafkaContainer(DockerImageName.parse("apache/kafka:3.7.0"));
+
+    @Container
+    @ServiceConnection(name = "redis")            // name required for GenericContainer
+    static GenericContainer<?> redis =
+        new GenericContainer<>("redis:7-alpine").withExposedPorts(6379);
+
+    @Autowired OrderService orderService;
+}
+```
+
+Out-of-the-box `@ServiceConnection` support: Postgres, MySQL, MariaDB, Oracle, MS SQL, MongoDB, Redis, Neo4j, Elasticsearch, Cassandra, Kafka, RabbitMQ, Zipkin, LDAP. For anything else, implement `ConnectionDetailsFactory`.
+
+### Reusable Containers (Dev Loop Accelerator)
+
+```java
+@Container
+static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine")
+    .withReuse(true);                         // Enable reuse for this container
+```
+
+Requires `testcontainers.reuse.enable=true` in `~/.testcontainers.properties`. When enabled, Testcontainers computes a hash of the container's configuration; if a container with the same hash is already running, it's reused instead of recreated. Startup drops from ~3s to ~100ms per test run.
+
+Caveats: reused containers are **not** cleaned up by Ryuk (you need to stop them manually or use Testcontainers Desktop). Shared state between test runs can cause order-dependent bugs — always reset data in `@BeforeEach`.
+
+### Testcontainers Desktop
+
+A free companion app that manages container reuse, provides fixed ports, and lets you point Testcontainers at a remote Docker engine (corporate Linux VM, cloud Docker). Useful when corporate laptops struggle with Docker Desktop licensing.
+
+### Development-Time Testcontainers with Spring Boot
+
+Beyond tests, Spring Boot can start Testcontainers when you run `bootRun`/`bootTestRun` for local development — no need for `docker compose up`:
+
+```java
+// src/test/java/.../TestMyApplication.java
+@TestConfiguration(proxyBeanMethods = false)
+public class TestcontainersConfig {
+
+    @Bean
+    @ServiceConnection
+    PostgreSQLContainer<?> postgres() {
+        return new PostgreSQLContainer<>("postgres:16-alpine");
+    }
+}
+
+public class TestMyApplication {
+    public static void main(String[] args) {
+        SpringApplication.from(MyApplication::main)
+            .with(TestcontainersConfig.class)
+            .run(args);
+    }
+}
+```
+
+Then run `./mvnw spring-boot:test-run` (or Gradle `bootTestRun`) — Spring starts the containers, wires them, and launches your app against them.
+
 ---
 
-## 5. WireMock
+## 6. WireMock
 
 ### Core Concept
 
@@ -1018,7 +1365,142 @@ class PaymentGatewayClientTest {
 
 ---
 
-## 6. ArchUnit
+## 7. Spring Boot Test Slices
+
+### Why Slices
+
+`@SpringBootTest` starts the full application context — thousands of beans, seconds of startup. Most tests only exercise one layer (controller, repository, JSON mapping). **Slices** load just the beans for that layer, keeping Spring-aware tests fast and focused.
+
+| Slice                      | Loads                                                                 | Use for                                    |
+|----------------------------|-----------------------------------------------------------------------|--------------------------------------------|
+| `@WebMvcTest`              | MVC infra: controllers, `@ControllerAdvice`, filters, `HttpMessageConverter`. Services are **not** loaded. | REST controllers (blocking)                |
+| `@WebFluxTest`             | WebFlux: `@Controller`, `RouterFunction`, `WebFluxConfigurer`, `WebFilter`. | Reactive controllers / functional endpoints |
+| `@DataJpaTest`             | JPA: `@Repository`, `EntityManager`, transactional rollback, embedded/Testcontainer DB. | JPA repositories, native queries           |
+| `@DataJdbcTest`            | Spring Data JDBC (no JPA cache).                                      | Data JDBC repos                            |
+| `@JdbcTest`                | Raw JDBC + `JdbcTemplate`.                                            | SQL-heavy code                             |
+| `@DataMongoTest`, `@DataRedisTest`, `@DataR2dbcTest`, `@DataNeo4jTest` | NoSQL / reactive repositories.                        | The relevant store                         |
+| `@JsonTest`                | Jackson / Gson / JSON-B auto-config only.                             | Serializers, `@JsonComponent`              |
+| `@RestClientTest`          | `RestTemplateBuilder` + `MockRestServiceServer`.                      | Outbound HTTP clients                      |
+
+### `@WebMvcTest` — Testing a Controller
+
+```java
+@WebMvcTest(OrderController.class)
+class OrderControllerTest {
+
+    @Autowired MockMvc mockMvc;
+
+    // Spring Boot 3.4+ uses @MockitoBean (replaced the older @MockBean)
+    @MockitoBean OrderService orderService;
+
+    @Test
+    void shouldReturnOrderAsJson() throws Exception {
+        given(orderService.find("ORD-1"))
+            .willReturn(new Order("ORD-1", OrderStatus.PAID, BigDecimal.TEN));
+
+        mockMvc.perform(get("/orders/ORD-1").accept(APPLICATION_JSON))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.id").value("ORD-1"))
+            .andExpect(jsonPath("$.status").value("PAID"));
+    }
+
+    @Test
+    void shouldReturn404WhenNotFound() throws Exception {
+        given(orderService.find("MISSING")).willThrow(new OrderNotFoundException());
+
+        mockMvc.perform(get("/orders/MISSING"))
+            .andExpect(status().isNotFound());
+    }
+}
+```
+
+> Note: `@MockBean` was deprecated in Spring Framework 6.2 / Spring Boot 3.4 in favour of `@MockitoBean` (Mockito) and `@MockitoSpyBean`. They sit in `org.springframework.test.context.bean.override.mockito`.
+
+### `@DataJpaTest` — Testing a Repository
+
+```java
+@DataJpaTest
+@Testcontainers
+@AutoConfigureTestDatabase(replace = Replace.NONE)   // use real PG, not H2
+class OrderRepositoryTest {
+
+    @Container @ServiceConnection
+    static PostgreSQLContainer<?> pg = new PostgreSQLContainer<>("postgres:16-alpine");
+
+    @Autowired OrderRepository repository;
+    @Autowired TestEntityManager em;
+
+    @Test
+    void shouldFindByCustomer() {
+        em.persist(new Order("O1", "cust-1", BigDecimal.TEN));
+        em.persist(new Order("O2", "cust-2", BigDecimal.ONE));
+        em.flush();
+
+        assertThat(repository.findByCustomerId("cust-1"))
+            .extracting(Order::id).containsExactly("O1");
+    }
+}
+```
+
+`@DataJpaTest` rolls back the transaction after each test — data is isolated without `@Transactional` boilerplate.
+
+### `@WebFluxTest` — Testing a Reactive Endpoint
+
+```java
+@WebFluxTest(OrderHandler.class)
+class OrderHandlerTest {
+
+    @Autowired WebTestClient client;
+    @MockitoBean OrderService orderService;
+
+    @Test
+    void shouldStreamOrders() {
+        given(orderService.stream())
+            .willReturn(Flux.just(new Order("A", PAID, TEN), new Order("B", PAID, ONE)));
+
+        client.get().uri("/orders/stream")
+            .accept(TEXT_EVENT_STREAM)
+            .exchange()
+            .expectStatus().isOk()
+            .expectBodyList(Order.class).hasSize(2);
+    }
+}
+```
+
+### `@JsonTest` — Testing a Serializer
+
+```java
+@JsonTest
+class OrderJsonTest {
+    @Autowired JacksonTester<Order> json;
+
+    @Test
+    void shouldSerialize() throws IOException {
+        var order = new Order("ORD-1", PAID, new BigDecimal("99.99"));
+
+        assertThat(json.write(order))
+            .hasJsonPathStringValue("$.id")
+            .extractingJsonPathStringValue("$.status").isEqualTo("PAID");
+    }
+}
+```
+
+### Picking the Right Scope
+
+```
+      /  @SpringBootTest  \          Full context, HTTP server, Testcontainers — slowest
+     /----------------------\
+    /   Slice tests          \       @WebMvcTest, @DataJpaTest, ... — medium
+   /--------------------------\
+  /   Plain JUnit + Mockito     \   No Spring — fastest
+ /______________________________\
+```
+
+Rule of thumb: use the narrowest test that still exercises what you need. A `@WebMvcTest` is ~3x faster than `@SpringBootTest` and forces controller logic to be independent of service wiring.
+
+---
+
+## 8. ArchUnit
 
 ### Core Concept
 
@@ -1167,7 +1649,7 @@ static final ArchRule exceptionsShouldEndWithException =
 
 ---
 
-## 7. Contract Testing
+## 9. Contract Testing
 
 ### Why Contract Testing
 
@@ -1321,7 +1803,26 @@ Contract.make {
 
 ---
 
-## 8. Test Patterns & Best Practices
+## 10. Test Doubles & Patterns
+
+### The Test Doubles Taxonomy (Meszaros / Fowler)
+
+"Test double" is the umbrella term for any stand-in used in a test. Senior interviewers expect you to distinguish them:
+
+| Double | What it is                                                                                           | Mockito/Spring equivalent                         |
+|--------|------------------------------------------------------------------------------------------------------|---------------------------------------------------|
+| Dummy  | Passed to satisfy a parameter, never used (`null`, `mock(Foo.class)` never invoked).                 | `mock(Foo.class)` handed in as filler             |
+| Stub   | Returns canned answers. Used for **state verification** (assert on the result).                      | `when(x).thenReturn(y)`                           |
+| Fake   | Real working implementation but unsuitable for production (in-memory DB, hashmap repo).              | H2, `InMemoryOrderRepository`                     |
+| Spy    | Real object that also records interactions. Real methods run unless overridden.                      | `@Spy` in Mockito                                 |
+| Mock   | Pre-programmed with expectations. Used for **behavior verification** (assert how it was called).     | `@Mock` + `verify(...)`                           |
+
+Two flavors of testing that come from this:
+
+- **State verification (classical, "Detroit")**: use stubs/fakes; assert on the outcome.
+- **Behavior verification (mockist, "London")**: use mocks; assert on which collaborators got called.
+
+Interview answer to "mock vs. stub": a stub returns data so you can check the final state; a mock records interactions so you can check how the object collaborates. Only mocks insist on interaction verification.
 
 ### Given/When/Then (Arrange/Act/Assert)
 
@@ -1474,9 +1975,131 @@ when(paymentGateway.charge(any())).thenReturn(ChargeResult.success("TXN-123"));
 
 This way, if the HTTP library changes API, you update one adapter class instead of dozens of tests.
 
+### Awaitility — Testing Asynchronous Code
+
+Never `Thread.sleep()` in tests. It bakes in the worst-case latency on every run and still flakes when the system is slow. Use Awaitility to poll until a condition holds or a timeout expires.
+
+```java
+import static org.awaitility.Awaitility.await;
+
+@Test
+void shouldConsumeEventAndPersistOrder() {
+    kafkaTemplate.send("orders", new OrderCreatedEvent("ORD-1"));
+
+    await().atMost(Duration.ofSeconds(10))
+        .pollInterval(Duration.ofMillis(200))
+        .untilAsserted(() -> {
+            assertThat(orderRepository.findById("ORD-1")).isPresent();
+        });
+}
+
+// Condition form
+await().atMost(5, SECONDS).until(() -> service.isReady());
+
+// Ignoring exceptions during polling (e.g. repository not yet populated)
+await().ignoreException(OrderNotFoundException.class)
+    .atMost(5, SECONDS)
+    .untilAsserted(() -> assertThat(service.find("ORD-1").status()).isEqualTo(PAID));
+```
+
+### Snapshot Testing (Approval Testing)
+
+For output that is tedious to write as inline expected values (complex JSON, generated SQL, rendered templates), snapshot testing stores the approved output in a file and diffs future runs against it.
+
+Libraries for Java: **ApprovalTests**, **JsonAssert** (for JSON-specific snapshots).
+
+```java
+@Test
+void shouldSerializeOrderApproval() {
+    var order = TestOrders.fullOrder();
+    Approvals.verify(objectMapper.writeValueAsString(order));
+    // First run: creates OrderTest.shouldSerializeOrderApproval.received.txt for review
+    // After approval, diffs against .approved.txt; fails on any change
+}
+```
+
+Useful for: snapshot of REST responses, serialized DTOs, generated code. Use sparingly — large snapshots make PR review noisy and hide which field actually changed.
+
+### Flakiness — Diagnosis Playbook
+
+Flaky tests are worse than no tests: they train the team to ignore CI. The playbook:
+
+1. **Quarantine, don't disable.** Tag `@Tag("flaky")` and exclude from the default CI run so flakes don't block merges, but the test still runs in a nightly job.
+2. **Find the root cause** before "fixing" with a retry. Common causes:
+   - Shared mutable state (static singletons, `@Autowired` DB not cleaned between tests).
+   - Time / clock dependence (`LocalDateTime.now()`, `Instant.now()`).
+   - Test order dependence — run with `@TestMethodOrder(MethodOrderer.Random.class)`.
+   - Network, port conflicts, slow Docker startup on CI runners.
+   - Unbounded async waits — fix with Awaitility, not longer `sleep`.
+3. **Reproduce locally** with `@RepeatedTest(50)` or Surefire's `rerunFailingTestsCount`.
+4. **Inject the clock** (`Clock` bean) and the randomness source (`Random` with a fixed seed).
+5. **Use deterministic IDs** in tests — `UUID.randomUUID()` destroys reproducibility.
+6. **Avoid cross-test coupling** — each test creates its own data, cleans up in `@AfterEach` or relies on transactional rollback.
+
+### Parallel Test Execution in Practice
+
+Running JUnit in parallel (see section 2) cuts unit test suite time, but beware:
+
+- **Spring context tests** share the cached context — concurrent writes to the same DB table collide. Use `@ResourceLock` on a named resource to serialize.
+- **Testcontainers** containers started per-class + `concurrent` class mode = N containers. Prefer the singleton pattern and keep class-level concurrency off.
+- **System properties and env vars** are JVM-global. Mark those tests `@ResourceLock(Resources.SYSTEM_PROPERTIES)`.
+- **Benchmarks, time-sensitive tests, flakiness repro** should run `SAME_THREAD`.
+
+Surefire parallelism at the **process** level (forked JVMs) is the safer option for integration tests — forks don't share memory:
+
+```xml
+<plugin>
+  <artifactId>maven-surefire-plugin</artifactId>
+  <configuration>
+    <forkCount>4</forkCount>
+    <reuseForks>false</reuseForks>
+  </configuration>
+</plugin>
+```
+
 ---
 
-## 9. TDD vs BDD
+## 11. Property-Based Testing (jqwik)
+
+### Example-Based vs. Property-Based
+
+Example-based (standard JUnit) tests assert that a specific input produces a specific output. Property-based testing (PBT) asserts **properties that must hold for any input in a given domain** — the framework generates hundreds of randomized inputs and tries to falsify the property.
+
+jqwik is the de-facto PBT library for Java, built on the JUnit Platform (no separate runner).
+
+```java
+@Property
+boolean reverseOfReverseIsOriginal(@ForAll List<Integer> list) {
+    return reverse(reverse(list)).equals(list);
+}
+
+@Property(tries = 500)
+void sortingProducesMonotonicList(@ForAll List<@IntRange(min=0, max=1000) Integer> xs) {
+    List<Integer> sorted = MyQuickSort.sort(xs);
+    assertThat(sorted).hasSameSizeAs(xs).isSorted();
+    assertThat(sorted).containsExactlyInAnyOrderElementsOf(xs);
+}
+```
+
+### Shrinking — Why PBT Pays Off
+
+When jqwik finds a failing input, it **shrinks** — repeatedly tries smaller versions of the input to find the minimal case that still fails. Instead of a 500-element list that crashes your sort, you get a 2-element list `[1, 0]` in the failure report, which is trivially debuggable.
+
+### Where PBT Earns Its Keep
+
+- **Parsers / formatters** — `assertThat(parse(format(x))).isEqualTo(x)` (round-trip).
+- **Commutative / associative operations** — `add(a, b) == add(b, a)`.
+- **Invariants** — after any sequence of mutations on an aggregate, invariants still hold.
+- **Serialization** — `deserialize(serialize(x)).equals(x)` across randomized payloads.
+- **Algorithms with known reference implementations** — compare fast path vs. naive.
+
+### Not a Replacement for Example Tests
+
+PBT finds bugs you didn't think of; example tests document business intent ("a premium customer gets a 15% discount"). Keep both.
+
+---
+
+## 12. TDD vs BDD
 
 ### Test-Driven Development (TDD)
 
@@ -1593,7 +2216,7 @@ public class ShoppingCartSteps {
 
 ---
 
-## 10. Mutation Testing
+## 13. Mutation Testing
 
 ### What It Measures
 
@@ -1612,12 +2235,12 @@ Code coverage tells you which lines execute during tests. It does NOT tell you i
 <plugin>
     <groupId>org.pitest</groupId>
     <artifactId>pitest-maven</artifactId>
-    <version>1.15.0</version>
+    <version>1.23.0</version>
     <dependencies>
         <dependency>
             <groupId>org.pitest</groupId>
             <artifactId>pitest-junit5-plugin</artifactId>
-            <version>1.2.1</version>
+            <version>1.2.2</version>
         </dependency>
     </dependencies>
     <configuration>
@@ -1688,7 +2311,7 @@ Equivalent mutants inflate the survival rate. PIT attempts to avoid obvious equi
 
 ---
 
-## 11. Common Senior Interview Questions
+## 14. Common Senior Interview Questions
 
 **Q1: You inherit a legacy codebase with zero tests. How do you start adding tests?**
 
@@ -1729,3 +2352,23 @@ Testcontainers runs the actual production database (PostgreSQL, MySQL, etc.) in 
 **Q10: What does "don't mock what you don't own" mean in practice?**
 
 This principle (from "Growing Object-Oriented Software, Guided by Tests" by Freeman and Pryce) means you should not create mocks of third-party library types (e.g., `HttpClient`, `EntityManager`, `KafkaTemplate`). Reasons: (1) You might mock behavior that doesn't match the real implementation. (2) Library upgrades can silently break your mocks without test failures. (3) It couples tests to implementation details of external code. Instead, create your own thin adapter/port interface, implement it using the third-party library, and mock your interface in unit tests. Test the adapter itself with integration tests (using Testcontainers, WireMock, etc.). This follows the Ports and Adapters (Hexagonal) architecture naturally.
+
+**Q11: Walk me through the five types of test doubles. When does it matter which one you use?**
+
+Dummy (passed in, never called — fills a parameter), Stub (returns canned data for state verification), Fake (real working implementation unsuitable for prod — in-memory DB), Spy (real object that also records calls), Mock (pre-programmed with expectations, used for behavior verification). The distinction matters because it drives what you assert on. With stubs/fakes you do **state verification** — assert on the outcome (the Detroit school). With mocks you do **behavior verification** — assert the collaborator was called correctly (the London/mockist school). Mixing them in one test is a smell; pick a style per test. Overusing mocks couples tests to internal collaboration and breaks on refactors; overusing fakes hides integration issues. Most senior teams favor stubs/fakes for business logic and mocks only at true integration boundaries (HTTP clients, message producers).
+
+**Q12: When would you use property-based testing instead of example-based tests?**
+
+PBT (e.g. jqwik) generates hundreds of random inputs and asserts a **property** must hold for all of them — `reverse(reverse(xs)) == xs`, `deserialize(serialize(x)).equals(x)`, `sort(xs)` preserves element count and order. It's brilliant for algorithms, parsers, round-trip serialization, commutative operations, and invariant checks on aggregates. The killer feature is **shrinking**: when jqwik finds a failing input, it shrinks it to the minimal failing case, so instead of debugging a 500-char string you debug `"a\0"`. PBT doesn't replace example tests — examples document business intent ("premium customer gets 15% discount") while properties encode mathematical/logical laws. Use both: PBT finds the edge cases you never thought of, examples keep the test suite readable.
+
+**Q13: How would you test a Spring Boot controller? Which test slice and why?**
+
+Use `@WebMvcTest(MyController.class)` for blocking controllers or `@WebFluxTest` for WebFlux. They load only the web layer (controllers, advice, filters, converters) — no services, no repositories, no DataSource — so the context starts in ~1 second instead of ~10. Mock the service dependencies with `@MockitoBean` (replaced the older `@MockBean` in Spring Boot 3.4). Drive assertions with `MockMvc` / `WebTestClient` + JSONPath. This keeps the test focused on routing, validation, serialization, and error mapping — exactly what a controller owns. A full `@SpringBootTest` is warranted only for cross-layer integration tests. For repositories, the equivalent is `@DataJpaTest` with `@Testcontainers` + `@ServiceConnection` to run against a real Postgres container.
+
+**Q14: How does Spring Boot's `@ServiceConnection` (3.1+) change how you wire Testcontainers?**
+
+Before 3.1 you had to write `@DynamicPropertySource` blocks to register JDBC URL, username, password, and bootstrap-servers for each container. `@ServiceConnection` replaces all of that boilerplate: annotate the container field, and Spring's `ConnectionDetailsFactory` infers the right Spring properties (or creates a `ConnectionDetails` bean). Works out of the box for Postgres, MySQL, Mongo, Redis, Kafka, RabbitMQ, Neo4j, Elasticsearch, Cassandra, LDAP, Zipkin. Besides tests, the same mechanism powers `spring-boot:test-run` — Spring Boot can start your Testcontainers for local development, so `./mvnw spring-boot:test-run` becomes the modern replacement for `docker compose up` while coding. For custom services not covered out of the box, implement `ConnectionDetailsFactory<C, D>`.
+
+**Q15: Is PowerMock still relevant in 2026? If I see it in a codebase, what do I do?**
+
+PowerMock is effectively dead. Mockito 5 (default since 2023) uses the inline MockMaker by default and handles everything PowerMock used to: `mockStatic`, `mockConstruction`, final classes, final methods, even some private-method cases via refactoring. PowerMock has no active maintenance and does not support modern JDKs cleanly. If you see it in a codebase: (1) short-term, keep it isolated so it doesn't spread; (2) medium-term, migrate tests to Mockito 5 (`mockStatic(Foo.class)` with try-with-resources replaces most `PowerMockito.mockStatic`); (3) long-term, the cases that need PowerMock usually signal designs that should change — extract the static/final dependency behind an interface and inject it, then you can use plain `@Mock` without any inline trickery.

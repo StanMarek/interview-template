@@ -62,9 +62,10 @@ Use multiple CDN providers for redundancy and performance. Route via DNS or a me
 
 ## CDN for Dynamic Content
 CDNs aren't just for static files:
-- **Edge computing**: Run code at the edge (Cloudflare Workers, Lambda@Edge). Personalize content without hitting origin.
+- **Edge computing**: Run code at the edge (Cloudflare Workers, Lambda@Edge, Vercel Edge Functions, Fastly Compute@Edge using WASM). Personalize content without hitting origin.
 - **TCP/TLS optimization**: CDN maintains persistent connections to origin; users get faster TLS handshake with nearby edge.
-- **Dynamic site acceleration**: Optimized routing between edge and origin (better than public internet).
+- **HTTP/3 over QUIC**: All major CDNs (Cloudflare, Akamai, Fastly, CloudFront) enable HTTP/3 by default. 0-RTT resumption and no head-of-line blocking drastically improve mobile/lossy-network performance.
+- **Dynamic site acceleration (DSA)**: Optimized routing between edge and origin (better than public internet).
 
 ## Security Features
 - **DDoS protection**: Edge network absorbs volumetric attacks

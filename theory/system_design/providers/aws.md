@@ -23,14 +23,16 @@
 |---------|------------|-------|
 | Managed SQL (MySQL/PostgreSQL) | **RDS** | Multi-AZ, read replicas, automated backups |
 | Cloud-native SQL | **Aurora** | MySQL/PostgreSQL compatible, 5x throughput, storage auto-scales |
+| Serverless distributed SQL (multi-region) | **Aurora DSQL** (GA 2025) | Active-active multi-region, strongly consistent, PostgreSQL-compatible. AWS's answer to Cloud Spanner. |
 | Managed NoSQL (key-value/document) | **DynamoDB** | Single-digit ms latency, auto-scaling, global tables |
-| Managed Redis/Memcached | **ElastiCache** | Redis or Memcached clusters |
-| Managed Elasticsearch | **OpenSearch Service** | Fork of Elasticsearch, integrated with AWS |
-| Graph database | **Neptune** | Property graph + RDF |
-| Time-series database | **Timestream** | Serverless, auto-scaling TSDB |
-| Data warehouse | **Redshift** | Columnar, petabyte-scale analytics |
+| Managed Redis/Memcached/Valkey | **ElastiCache** | Redis OSS, Valkey, or Memcached clusters (Valkey added 2024) |
+| Managed Elasticsearch | **OpenSearch Service** | Fork of Elasticsearch, includes serverless option and vector search |
+| Graph database | **Neptune** | Property graph + RDF; Neptune Analytics for graph analytics |
+| Time-series database | **Timestream** (LiveAnalytics + InfluxDB) | Serverless TSDB; Timestream for InfluxDB added 2024 |
+| Data warehouse | **Redshift** | Columnar, petabyte-scale analytics, Serverless option |
 | Managed Cassandra | **Keyspaces** | Serverless Cassandra-compatible |
-| In-memory database | **MemoryDB for Redis** | Durable, Redis-compatible, multi-AZ |
+| In-memory database | **MemoryDB** | Durable, Redis/Valkey-compatible, multi-AZ |
+| Iceberg tables on S3 | **S3 Tables** (GA 2024) | Fully managed Apache Iceberg tables with automatic compaction |
 
 ## Networking
 | Concept | AWS Service | Notes |
@@ -77,11 +79,22 @@
 ## Data & Analytics
 | Concept | AWS Service | Notes |
 |---------|------------|-------|
-| Data lake query engine | **Athena** | Serverless SQL over S3 (Presto/Trino) |
+| Data lake query engine | **Athena** | Serverless SQL over S3 (Presto/Trino), supports Iceberg |
 | ETL | **Glue** | Managed Spark ETL + data catalog |
-| Real-time analytics | **Kinesis Data Analytics** | SQL/Flink over streaming data |
+| Real-time analytics | **Managed Service for Apache Flink** (formerly Kinesis Data Analytics) | Flink over streaming data |
 | Data lake formation | **Lake Formation** | Centralized data lake governance |
-| BI / visualization | **QuickSight** | Managed BI dashboards |
+| BI / visualization | **QuickSight** | Managed BI; includes Q (NLQ) and Generative BI features |
+| Unified analytics platform | **SageMaker Unified Studio / Lakehouse** (2024) | Merges Glue, EMR, Redshift, Athena, SageMaker into one workbench |
+
+## AI / ML
+| Concept | AWS Service | Notes |
+|---------|------------|-------|
+| Foundation models (GenAI) | **Amazon Bedrock** | Managed access to Claude, Llama, Titan, Mistral, etc. Agents, Knowledge Bases, Guardrails. |
+| AI coding assistant | **Amazon Q Developer** (formerly CodeWhisperer) | IDE + CLI assistant, /dev agent, code transformation |
+| Business AI assistant | **Amazon Q Business** | RAG over enterprise data |
+| ML platform (end-to-end) | **SageMaker AI** | Build, train, tune, deploy models; SageMaker Studio |
+| Vector search | **OpenSearch Serverless (vector)**, **Aurora pgvector**, **MemoryDB vector** | Multiple vector options |
+| Speech / Vision / NLP | **Polly, Transcribe, Rekognition, Comprehend, Textract** | Purpose-built AI services |
 
 ## Key AWS Concepts for Interviews
 - **Regions & Availability Zones**: A region has 2-6 AZs. Each AZ is an isolated data center. Design for multi-AZ (HA) and multi-region (DR).
@@ -93,6 +106,9 @@
 - **DynamoDB Accelerator (DAX)**: In-memory cache for DynamoDB (microsecond reads).
 - **Global Accelerator**: Anycast-based global traffic routing to the nearest region.
 - **Aurora Global Database**: Cross-region replication with <1 second lag.
+- **Aurora DSQL vs Spanner**: Aurora DSQL is AWS's multi-region strongly consistent SQL (PostgreSQL wire-compat), competitor to Google Spanner.
+- **Bedrock + Knowledge Bases + Agents**: RAG + tool-use pattern for GenAI apps.
+- **Deprecated/sunset**: SimpleDB (legacy, not available to new customers), CloudSearch (legacy — use OpenSearch), Classic Load Balancer (avoid), Cloud9 (discontinued 2024), CodeCommit (closed to new customers 2024).
 
 ## Common Architecture Patterns on AWS
 ```

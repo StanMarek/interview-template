@@ -67,7 +67,7 @@ public int eraseOverlapIntervals(int[][] intervals) {
 }
 ```
 
-### Meeting Rooms II
+### Meeting Rooms II (Minimum Platforms pattern)
 
 ```java
 public int minMeetingRooms(int[][] intervals) {
@@ -89,32 +89,123 @@ public int minMeetingRooms(int[][] intervals) {
 }
 ```
 
+Alternative: **min-heap of end times** — push each start; if heap top ≤ current start, poll. Heap size = rooms. Same O(n log n).
+
+### Sweep Line / Events (max concurrent intervals, car pooling)
+
+Convert each interval to events: `(start, +1)` and `(end, -1)`. Sort by time (ties: `-1` before `+1` when touching ends don't overlap). Running sum = current overlap; max = answer.
+
+```java
+// Car Pooling: given trips [[passengers, from, to], ...], capacity
+public boolean carPooling(int[][] trips, int capacity) {
+    int[] diff = new int[1001]; // bucket diff array when range is small
+    for (int[] t : trips) { diff[t[1]] += t[0]; diff[t[2]] -= t[0]; }
+    int load = 0;
+    for (int d : diff) { load += d; if (load > capacity) return false; }
+    return true;
+}
+```
+
+### The Skyline Problem (sweep line + max-heap)
+
+Events: for each building `[L, R, H]` emit `(L, -H)` (start, negative for ordering) and `(R, H)` (end). Sort events; maintain a multiset (or `TreeMap<Integer,Integer>` of counts) of active heights. Whenever the current max height changes, emit `(x, newMax)`. O(n log n).
+
+### Interval Tree (brief)
+
+Augmented BST keyed on interval start; each node stores max end in its subtree. Supports "find any overlap" in O(log n) and "find all k overlaps" in O(k log n). Overkill for static problems (use sort + sweep); useful for dynamic insert/delete + overlap queries.
+
 ## Sorting Algorithms to Know
 
-| Algorithm      | Best    | Average | Worst   | Space  | Stable |
-|----------------|---------|---------|---------|--------|--------|
-| Quick Sort     | O(n lg n)| O(n lg n)| O(n²) | O(lg n)| No     |
-| Merge Sort     | O(n lg n)| O(n lg n)| O(n lg n)| O(n)| Yes    |
-| Heap Sort      | O(n lg n)| O(n lg n)| O(n lg n)| O(1)| No     |
-| Counting Sort  | O(n+k)  | O(n+k)  | O(n+k)  | O(k) | Yes    |
-| Radix Sort     | O(nk)   | O(nk)   | O(nk)   | O(n+k)| Yes    |
-| Tim Sort (Java)| O(n)    | O(n lg n)| O(n lg n)| O(n)| Yes    |
+| Algorithm      | Best     | Average  | Worst    | Space   | Stable | In-place |
+|----------------|----------|----------|----------|---------|--------|----------|
+| Quick Sort     | O(n lg n)| O(n lg n)| O(n²)    | O(lg n) | No     | Yes      |
+| Merge Sort     | O(n lg n)| O(n lg n)| O(n lg n)| O(n)    | Yes    | No       |
+| Heap Sort      | O(n lg n)| O(n lg n)| O(n lg n)| O(1)    | No     | Yes      |
+| Insertion Sort | O(n)     | O(n²)    | O(n²)    | O(1)    | Yes    | Yes      |
+| Counting Sort  | O(n+k)   | O(n+k)   | O(n+k)   | O(k)    | Yes    | No       |
+| Radix Sort     | O(d(n+k))| O(d(n+k))| O(d(n+k))| O(n+k)  | Yes    | No       |
+| Bucket Sort    | O(n+k)   | O(n+k)   | O(n²)    | O(n+k)  | Yes    | No       |
+| TimSort (Java) | O(n)     | O(n lg n)| O(n lg n)| O(n)    | Yes    | No       |
+
+- **Counting sort:** integers in small range `[0, k]`. Not comparison-based; beats the Ω(n log n) bound.
+- **Radix sort:** fixed-width keys (ints, strings); `d` = digits. Use LSD with a stable counting sort per digit.
+- **Bucket sort:** uniformly distributed floats; scatter into `n` buckets, insertion-sort each.
 
 ### Java Sorting
 
 ```java
-// Primitives: Dual-Pivot Quicksort — NOT stable
+// Primitives: Dual-Pivot Quicksort (DualPivotQuicksort) — NOT stable, in-place
 Arrays.sort(intArray);
 
-// Objects: TimSort — stable
+// Objects / int[][]: TimSort (adaptive merge sort) — stable
 Arrays.sort(objectArray);
-Arrays.sort(arr, (a, b) -> a[0] - b[0]); // custom comparator
-Arrays.sort(arr, Comparator.comparingInt(a -> a[0])); // safer, no overflow
+Arrays.sort(arr, (a, b) -> a[0] - b[0]);              // beware overflow
+Arrays.sort(arr, Comparator.comparingInt(a -> a[0])); // safer
 
-// Partial sort: use PriorityQueue for top-K (O(n log k))
+// List.sort vs Collections.sort:
+//   Collections.sort(list)  -> delegates to list.sort(null)
+//   list.sort(cmp)          -> ArrayList overrides to sort backing array in-place
+//                              (no copy → faster). Prefer list.sort.
+
+// Parallel sort (fork-join, threshold ~8192): Arrays.parallelSort(arr);
+
+// Partial sort / Kth largest: PriorityQueue of size K → O(n log k)
+// Exact Kth: QuickSelect (see below) → O(n) average, O(n²) worst
 ```
 
+### QuickSelect — Kth Order Statistic in O(n) avg
+
+```java
+// Returns the kth smallest (0-indexed) via Lomuto partition
+public int quickSelect(int[] a, int k) {
+    int lo = 0, hi = a.length - 1;
+    Random rnd = new Random();
+    while (lo < hi) {
+        int p = partition(a, lo, hi, lo + rnd.nextInt(hi - lo + 1));
+        if (p == k) return a[p];
+        if (p < k) lo = p + 1; else hi = p - 1;
+    }
+    return a[lo];
+}
+private int partition(int[] a, int lo, int hi, int pivotIdx) {
+    int pivot = a[pivotIdx]; swap(a, pivotIdx, hi);
+    int i = lo;
+    for (int j = lo; j < hi; j++) if (a[j] < pivot) swap(a, i++, j);
+    swap(a, i, hi); return i;
+}
+```
+
+Randomized pivot → O(n) expected. Median-of-medians gives O(n) worst case but is slower in practice.
+
+### Comparator Cookbook
+
+```java
+// Multi-key sort: by length asc, then lexicographically
+words.sort(Comparator.comparingInt(String::length).thenComparing(Comparator.naturalOrder()));
+
+// Reverse
+arr.sort(Comparator.comparingInt(Foo::score).reversed());
+
+// Null-safe
+list.sort(Comparator.nullsLast(Comparator.naturalOrder()));
+
+// Custom extraction with reverse on one key
+people.sort(Comparator.comparing(Person::lastName)
+                      .thenComparing(Person::age, Comparator.reverseOrder()));
+```
+
+Note: `reversed()` reverses the *whole* chain built so far; apply it to a specific key via `Comparator.reverseOrder()` inside `thenComparing`.
+
 ## Greedy Patterns
+
+### Proving Greedy Correctness
+
+Two standard proof techniques — expect to name one in interviews:
+
+1. **Exchange argument.** Assume an optimal solution `OPT` differs from greedy `G` at the first position. Swap in `G`'s choice; show the result is no worse than `OPT`. Repeat → `G` itself is optimal. (Used for: activity selection / non-overlapping intervals, Huffman, scheduling to minimize lateness.)
+2. **Greedy stays ahead.** Show that after step `k`, greedy's partial solution is at least as good as any other algorithm's. Induct to `n`. (Used for: jump game, gas station, interval covering.)
+
+If you can't construct one of these, greedy probably doesn't work — fall back to DP.
 
 ### Jump Game
 
@@ -147,12 +238,16 @@ public int leastInterval(char[] tasks, int n) {
 
 **Medium:** Merge Intervals, Insert Interval, Non-Overlapping Intervals, Meeting Rooms II, Interval List Intersections, Sort Colors, Minimum Number of Arrows to Burst Balloons, Jump Game, Task Scheduler, Gas Station, Partition Labels.
 
-**Hard:** Employee Free Time, The Skyline Problem, Minimum Interval to Include Each Query.
+**Medium (add):** Car Pooling, Minimum Platforms, Kth Largest Element in an Array (QuickSelect).
+
+**Hard:** Employee Free Time, The Skyline Problem, Minimum Interval to Include Each Query, Data Stream as Disjoint Intervals.
 
 ## Tips and Pitfalls
 
-- **Sort by start or end?** Merge/insert → sort by start. Scheduling/selection → sort by end.
-- **Comparator overflow:** `(a, b) -> a[0] - b[0]` overflows for extreme values. Use `Integer.compare(a[0], b[0])`.
-- **Line sweep technique:** Convert intervals to events (start +1, end -1), sort, and sweep. Great for "max overlap" problems.
-- **Greedy needs proof.** In interviews, briefly explain *why* the greedy choice works (exchange argument or staying ahead).
-- **Greedy vs DP:** If greedy doesn't work (can't prove optimality), fall back to DP.
+- **Sort by start or end?** Merge/insert → sort by start. Scheduling/selection (non-overlapping, arrows) → sort by end.
+- **Open vs closed intervals.** `[1,2]` and `[2,3]`: touching ≠ overlapping if endpoints are exclusive. Clarify with interviewer; decide whether `<` or `<=` in the merge check.
+- **Comparator overflow:** `(a, b) -> a[0] - b[0]` overflows for extreme values. Use `Integer.compare(a[0], b[0])` or `Comparator.comparingInt`.
+- **Line sweep:** convert intervals to events `(t, +1)` / `(t, -1)`, sort, running sum = concurrent count. When timestamps are small integers, use a **difference array** for O(n + range).
+- **Prefer `list.sort(cmp)` over `Collections.sort(list, cmp)`** — `ArrayList.sort` avoids the `toArray` + copy-back round-trip.
+- **Stable sort matters** when you pre-sort by a secondary key and then re-sort by the primary: stability preserves the prior order. Primitives sort is **not** stable — box to `Integer[]` if you need that.
+- **Greedy needs proof.** Briefly name the technique (exchange argument or staying ahead). If neither fits, fall back to DP.
