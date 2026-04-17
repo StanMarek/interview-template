@@ -9,8 +9,10 @@
 ### How the Container Works
 
 The Spring IoC container manages object creation, wiring, and lifecycle. The two main container types:
-- `BeanFactory`: Lazy initialization, lightweight
-- `ApplicationContext`: Eager initialization, adds AOP, events, i18n, environment abstraction
+- `BeanFactory`: The base container contract — `getBean()` lazily resolves on demand.
+- `ApplicationContext`: Extends `BeanFactory` (adds AOP, events, i18n, environment abstraction). By default it **pre-instantiates singletons eagerly at startup**.
+
+> Note: `ApplicationContext` *extends* `BeanFactory` — they are not alternatives. The laziness contrast is about default behavior: `ApplicationContext` pre-instantiates singletons eagerly; `BeanFactory`'s basic contract is lazy on `getBean()`. Use `scope="prototype"` or `@Lazy` to defer `ApplicationContext` instantiation.
 
 **Bean Lifecycle (in order)**:
 1. Instantiation (constructor or factory method)
@@ -23,6 +25,8 @@ The Spring IoC container manages object creation, wiring, and lifecycle. The two
 8. `BeanPostProcessor.postProcessAfterInitialization()` ← **AOP proxies created here**
 9. Bean is ready for use
 10. `@PreDestroy` / `DisposableBean.destroy()` / `destroy-method`
+
+> Note: `ApplicationContextAware` is actually invoked DURING `postProcessBeforeInitialization` via `ApplicationContextAwareProcessor` — it's not a separate step before BPPs. Only the bean-factory-level Aware interfaces (`BeanNameAware`, `BeanClassLoaderAware`, `BeanFactoryAware`) fire before BPPs. The same applies to `EnvironmentAware`, `ApplicationEventPublisherAware`, `ResourceLoaderAware`, etc. — all are invoked by `ApplicationContextAwareProcessor` (a `BeanPostProcessor`) inside the before-init phase.
 
 ### Bean Scopes
 
@@ -78,13 +82,13 @@ public class PrototypeBean { }
 **Circular Dependencies**:
 - Constructor injection → `BeanCurrentlyInCreationException` (fails fast)
 - Setter/field injection → Resolved via early reference exposure (three-level cache internally), but is a design smell
-- **Spring 6+ / Boot 3+**: Circular deps are prohibited by default; must opt-in with `spring.main.allow-circular-references=true`
+- **Disabled by default since Spring Boot 2.6** (not Boot 3); must opt-in with `spring.main.allow-circular-references=true`. This setting has carried forward into Boot 3+.
 
 **How @Autowired Resolution Works**:
 1. Match by type
 2. If multiple candidates → match by qualifier (`@Qualifier`)
-3. If still ambiguous → match by bean name (field/parameter name)
-4. If still ambiguous → `@Primary` bean wins
+3. If still ambiguous → `@Primary` bean wins
+4. If still ambiguous → match by bean name (field/parameter name)
 5. If all but one candidate are `@Fallback` (Spring 6.2+) → the non-fallback bean wins
 6. Otherwise → `NoUniqueBeanDefinitionException`
 
@@ -356,7 +360,7 @@ User user = restClient.get()
 // Boot 3.4+ auto-configures a RestClient.Builder with Micrometer observation + SSL bundles.
 ```
 
-**Gotcha (Spring 6.2)**: `retrieve()` without a terminal operation used to fire the request. It is now a **no-op**; you must call `.body(...)`, `.toEntity(...)`, or `.toBodilessEntity()`.
+**Gotcha**: `retrieve()` returns a builder-like object; you must call a terminal operation like `.body(Class)`, `.toEntity(Class)`, or `.toBodilessEntity()` to actually execute the request. This has always been the behavior — `retrieve()` alone is not enough.
 
 ### Declarative `@HttpExchange` Clients
 

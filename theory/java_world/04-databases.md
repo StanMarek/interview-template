@@ -22,7 +22,7 @@
 | REPEATABLE READ (default MySQL InnoDB) | ❌ No | ❌ No | ✅ Yes (❌ in MySQL*) | Moderate |
 | SERIALIZABLE | ❌ No | ❌ No | ❌ No | Slowest |
 
-*MySQL InnoDB's REPEATABLE READ uses gap locks to also prevent phantom reads in most cases.
+*MySQL InnoDB prevents phantoms for locking reads (SELECT FOR UPDATE/SHARE) via gap+next-key locks; plain SELECT uses MVCC consistent snapshots, which also don't see phantoms. Write-skew anomalies can still occur.
 
 **MVCC (Multi-Version Concurrency Control)**:
 - PostgreSQL: Each row version has `xmin` (creating txn) and `xmax` (deleting txn). Readers see a consistent snapshot. Dead tuples cleaned by VACUUM.
@@ -30,7 +30,7 @@
 
 **Key difference**: PostgreSQL stores all versions in the main table (requires VACUUM). InnoDB stores current version in table, old versions in undo space (no VACUUM needed, but long transactions hold undo space).
 
-**PostgreSQL serialization anomaly** (SERIALIZABLE-only risk): Two transactions each reading a set and writing based on it can both commit under SERIALIZABLE using SSI (Serializable Snapshot Isolation) only if no dangerous cycle is detected. If one is detected, PG throws `serialization_failure` (SQLSTATE 40001) — **application must retry**. Under REPEATABLE READ (PG's snapshot isolation), this anomaly can silently produce inconsistent writes. Interview gotcha: PG REPEATABLE READ ≠ SQL standard REPEATABLE READ; it is actually snapshot isolation and is stronger for reads but weaker for write skew.
+**PostgreSQL serialization anomaly** (SERIALIZABLE-only risk): Two transactions each reading a set and writing based on it can both commit under SERIALIZABLE using SSI (Serializable Snapshot Isolation) only if no dangerous cycle is detected. If one is detected, PG throws `serialization_failure` (SQLSTATE 40001) — **application must retry**. Under REPEATABLE READ (PG's snapshot isolation), this anomaly can silently produce inconsistent writes. Interview gotcha: PostgreSQL's REPEATABLE READ implements Snapshot Isolation — strictly stronger than ANSI SQL RR (prevents phantom reads on non-locking reads). Write-skew anomalies are still possible; use SERIALIZABLE (SSI) to eliminate them.
 
 ### Locking
 
@@ -318,11 +318,11 @@ In practice, network partitions DO happen, so the real choice is **CP** (consist
 
 | System | CAP | Notes |
 |--------|-----|-------|
-| PostgreSQL (single node) | CA | No partition tolerance (single node) |
+| PostgreSQL (single node) | — | Single-node systems are not subject to CAP — the theorem only applies to distributed systems. Classifying a non-distributed DB as 'CA' is a common misconception. |
 | MongoDB | CP | Primary election on partition → unavailable briefly |
 | Cassandra | AP | Tunable consistency (quorum reads/writes) |
 | DynamoDB | AP | Eventually consistent reads (or strongly consistent option) |
-| Redis Cluster | AP | Async replication → potential data loss on failover |
+| Redis Cluster | AP* | Async replication → potential data loss on failover. *Redis Cluster defaults to `cluster-require-full-coverage=yes`, which rejects writes during minority partitions — making it closer to CP in that config. AP classification applies when coverage enforcement is disabled and/or async replication is accepted. |
 
 ### Redis Deep Dive
 
@@ -722,7 +722,7 @@ CREATE EXTENSION vector;
 CREATE TABLE documents (
     id BIGSERIAL PRIMARY KEY,
     content TEXT,
-    embedding VECTOR(1536)           -- OpenAI ada-002 dim; use 3072 for text-embedding-3-large
+    embedding VECTOR(1536)           -- matches OpenAI ada-002 and text-embedding-3-small; use 3072 for text-embedding-3-large (Matryoshka-truncatable to smaller sizes)
 );
 -- HNSW index (approx NN, fast). IVFFlat is the older alternative.
 CREATE INDEX ON documents USING hnsw (embedding vector_cosine_ops);

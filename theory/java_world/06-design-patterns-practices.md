@@ -193,9 +193,9 @@ public enum ConnectionPool {
 |--------------------|:-:|:-:|:-:|
 | Eager static field | Yes | No (writes new instance) | No |
 | Synchronized getInstance | Yes (slow) | No | No |
-| Double-checked locking | Yes (tricky, needs `volatile`) | No | No |
+| Double-checked locking | Yes, but **only** with `volatile` — without `volatile`, the JMM allows the constructor's partial writes to be seen by another thread reading the non-null reference, observing a partially-constructed object. "Double-checked locking is broken" refers specifically to the no-`volatile` variant. | No | No |
 | Initialization-on-demand holder | Yes | No | No |
-| **Enum** | **Yes** | **Yes** | **Yes** |
+| **Enum** | **Yes** | **Yes** | **Yes** (against `Constructor.newInstance` — enum constructors are special-cased to throw `IllegalArgumentException`). Can still be bypassed via `Unsafe.allocateInstance` in theory. |
 
 ### Structural
 
@@ -248,8 +248,9 @@ PaymentGateway proxy = (PaymentGateway) Proxy.newProxyInstance(
         finally { metrics.record(method.getName(), System.nanoTime() - start); }
     });
 
-// Spring's @Transactional, @Cacheable, @PreAuthorize all work via proxies
-// Cglib subclass proxy for classes, JDK dynamic proxy for interfaces.
+// Spring's @Transactional, @Cacheable, @PreAuthorize all work via proxies.
+// Spring Boot 2.x+ defaults to CGLIB proxies for all AOP (`spring.aop.proxy-target-class=true`).
+// JDK dynamic proxies are only used when explicitly configured and the target implements interfaces.
 ```
 
 **Facade** — a single simplified entry point in front of a subsystem (classic use: wrapping a noisy third-party SDK behind one service interface). Often confused with Adapter — Facade simplifies, Adapter translates.
@@ -361,7 +362,7 @@ cmd.execute();
 
 ### Modern replacement: sealed types + pattern matching
 
-The **Visitor** pattern is largely obsolete in Java 21+. Sealed hierarchies give the compiler exhaustiveness guarantees without double-dispatch ceremony:
+Sealed types + pattern matching replace Visitor's common use case (exhaustive dispatch on a closed hierarchy) in Java 21+. Visitor remains useful when you need to extend behavior without modifying the hierarchy, or dispatch on two axes (double dispatch). Sealed hierarchies give the compiler exhaustiveness guarantees without double-dispatch ceremony:
 ```java
 public sealed interface PaymentEvent
     permits Authorized, Captured, Refunded, Failed {}
@@ -385,7 +386,7 @@ This replaces the Visitor pattern's double-dispatch machinery with a single exha
 
 ### Modern Observer: `java.util.concurrent.Flow`
 
-`java.util.Observer` / `Observable` were **deprecated in Java 9** and fully removed in later releases. Use the Reactive Streams-compatible `Flow` API (or Project Reactor / RxJava for a richer operator set):
+`java.util.Observer` / `Observable` have been **deprecated since Java 9** (JDK-8154801) but remain in the JDK — they have **NOT** been removed. Avoid them in new code; use `PropertyChangeListener`, reactive streams, or Spring's `ApplicationEventPublisher` instead. For new pub/sub code use the Reactive Streams-compatible `Flow` API (or Project Reactor / RxJava for a richer operator set):
 ```java
 SubmissionPublisher<OrderEvent> publisher = new SubmissionPublisher<>();
 publisher.subscribe(new Flow.Subscriber<>() {
@@ -787,7 +788,7 @@ Related: **Onion / Clean Architecture** — same principle, different diagram. *
 | **Constructor injection** | Always preferred for required dependencies. | Fields can be `final`. Object is never in a half-constructed state. Easy to unit test — just `new`. |
 | **Setter injection** | Optional collaborators that have sensible defaults. | Weakens immutability; prefer a config object instead. |
 | **Field injection (`@Autowired` on fields)** | Avoid. | Impossible to test without reflection, hides dependencies, can't be `final`. |
-| **Method injection (`@Lookup`)** | Singleton needs prototype-scoped collaborator. | Rare; usually a smell. |
+| **Method injection (`@Lookup`)** | Singleton needs prototype-scoped collaborator. | `@Lookup` is the recommended Spring mechanism for injecting prototype-scoped beans into singleton beans (avoiding stale references). Not a smell — it's idiomatic. |
 
 ```java
 // PREFERRED — constructor injection with a single constructor is picked up by Spring

@@ -279,7 +279,8 @@ Virtual threads (preview in Java 19, stable in Java 21 via JEP 444) are lightwei
 | Java 19 | JEP 425 | Preview |
 | Java 21 (LTS) | JEP 444 | Standard / GA |
 | Java 24 | JEP 491 | Reimplemented `synchronized` so virtual threads no longer pin the carrier when entering/holding monitors or calling `Object.wait()` |
-| Java 25 (LTS) | JEP 505 | Structured Concurrency — **5th preview** (still not final) |
+| Java 24 | JEP 505 | Structured Concurrency — **4th preview** |
+| Java 25 (LTS) | JEP 499 | Structured Concurrency — **5th preview** (still not final) |
 | Java 25 (LTS) | JEP 506 | Scoped Values finalized |
 
 ### How They Work
@@ -344,10 +345,11 @@ A virtual thread is **pinned** when it cannot be unmounted from its carrier.
 **Java 24+ (JEP 491) — `synchronized` no longer pins.** The JVM reimplemented the synchronized keyword and `Object.wait()` so virtual threads can suspend while holding a monitor. This removed the single biggest Loom migration pain point. Advice pre-Java-24 was "replace every `synchronized` with `ReentrantLock`" — that advice is **no longer necessary** on Java 24+.
 
 **Still pins (even on Java 25):**
-- Native calls (JNI)
-- `Object.wait()` inside a class initializer
+- Native calls (JNI) — including `Object.wait()` if it occurs in a native frame
+- Class initializer blocking (code that blocks inside `<clinit>`)
 - Blocking while resolving symbolic references during class loading
-- Code that blocks inside `<clinit>`
+
+Note: per JEP 491 (JDK 24), `Object.wait()` itself no longer pins; it only pins when called from within a native frame.
 
 **If you are stuck on Java 21–23**, swap `synchronized` for `ReentrantLock` in blocks that contain blocking IO:
 
@@ -688,7 +690,7 @@ lock.getQueueLength();  // waiting threads
 | Fairness policy | Never | `new ReentrantLock(true)` |
 | Multiple condition queues | Only the one monitor wait-set | `newCondition()` — many per lock |
 | Virtual-thread friendly (Java 21–23) | Pins carrier | No pinning |
-| Virtual-thread friendly (Java 24+) | No pinning (JEP 491) | No pinning |
+| Virtual-thread friendly (Java 24+) | No pinning on Java 24+ except in JNI/native frames (JEP 491) | No pinning |
 | Auto-unlock on scope exit | Yes (block scope) | No — must use `try/finally` |
 
 ### CountDownLatch -- Wait for N Events
@@ -1026,10 +1028,12 @@ Memory barriers (fences) are CPU instructions that enforce ordering. The JMM use
 | LoadStore | No store can be reordered before a preceding load |
 | StoreLoad | No load can be reordered before a preceding store (most expensive) |
 
-- `volatile` write inserts StoreStore + StoreLoad barriers
-- `volatile` read inserts LoadLoad + LoadStore barriers
-- `synchronized` enter inserts LoadLoad + LoadStore
-- `synchronized` exit inserts StoreStore + StoreLoad
+Per the JSR-133 Cookbook (Doug Lea), the barrier placements are:
+
+- **Volatile store**: `StoreStore` barrier **before** the store; `StoreLoad` barrier **after** the store (between it and any subsequent volatile load).
+- **Volatile load**: `LoadLoad` and `LoadStore` barriers **after** the load.
+- **MonitorEnter** (acquire semantics): `LoadLoad` + `LoadStore` barriers **after** enter.
+- **MonitorExit** (release semantics): `LoadStore` + `StoreStore` barriers **before** exit.
 
 ### Data Races
 
@@ -1688,7 +1692,7 @@ Limitations:
 
 **Q4: How does `ConcurrentHashMap` achieve thread safety? Why is `get()` + `put()` not atomic?**
 
-Since Java 8, `ConcurrentHashMap` uses a combination of `volatile` reads and bucket-level `synchronized` locking. Reads are fully lock-free: the table array and node values are `volatile`, so get() always sees the most recent write. Writes synchronize on the first node of the target bucket, so only threads writing to the same bucket contend with each other.
+Since Java 8, `ConcurrentHashMap` uses a combination of `volatile` reads and bucket-level `synchronized` locking. Reads are fully lock-free: the table array and node values are `volatile`. `get()` is **weakly consistent** — it observes a consistent value per-bucket but does NOT provide a linearization point with concurrent writes. Writes synchronize on the first node of the target bucket, so only threads writing to the same bucket contend with each other.
 
 `get()` + `put()` is not atomic because they are two separate operations with no happens-before relationship between them. Between the `get()` and `put()`, another thread can modify the map. This is the classic check-then-act race condition. Instead, use the atomic compound operations: `computeIfAbsent()`, `computeIfPresent()`, `compute()`, or `merge()`. These lock the bucket and perform the read + write as a single atomic operation.
 

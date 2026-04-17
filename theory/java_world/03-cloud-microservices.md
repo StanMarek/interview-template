@@ -32,11 +32,11 @@ Each microservice should align with a **Bounded Context** — a boundary within 
 
 **Synchronous**:
 - **REST/HTTP**: Simple, well-understood. Risk: temporal coupling, cascading failures.
-- **gRPC**: Binary protocol (Protobuf), strongly typed, bidirectional streaming, ~10x faster than REST. Risk: harder to debug, requires code generation.
+- **gRPC**: Binary protocol (Protobuf), strongly typed, bidirectional streaming, 2-10x faster than REST depending on payload size, serialization, and scenario. Risk: harder to debug, requires code generation.
 - **GraphQL**: Client-specified queries, reduces over/under-fetching. Risk: N+1 queries on server, complexity in caching.
 
 **Asynchronous**:
-- **Message Queues** (RabbitMQ, SQS): Point-to-point, guaranteed delivery with acks.
+- **Message Queues** (RabbitMQ, SQS): RabbitMQ supports point-to-point (direct queue) AND pub/sub (fanout/topic/headers exchanges). SQS standard queues are at-least-once; SQS FIFO offers exactly-once processing within a 5-minute dedup window.
 - **Event Streaming** (Kafka, Kinesis): Pub/sub, event log, replay capability.
 - **Event-Driven Architecture**: Services react to events instead of being called directly. Enables loose coupling.
 
@@ -472,11 +472,11 @@ In Spring Boot 3.x the trace/span IDs are auto-injected into MDC (`%X{traceId}`,
 
 ### eBPF-Based Observability (zero-instrumentation)
 
-eBPF (extended Berkeley Packet Filter) lets you run sandboxed programs in the Linux kernel, giving observability tools deep visibility without app changes. By 2026 it's table stakes — adopted by ~67% of teams running K8s at scale.
+eBPF (extended Berkeley Packet Filter) lets you run sandboxed programs in the Linux kernel, giving observability tools deep visibility without app changes. eBPF-based observability adoption has grown rapidly; CNCF annual surveys track the trend.
 
 | Tool | Purpose |
 |------|---------|
-| **Cilium + Hubble** | CNI + L3-L7 network observability; default CNI on GKE, EKS, AKS |
+| **Cilium + Hubble** | CNI + L3-L7 network observability; Default CNI: GKE Dataplane V2 (enabled by default on new clusters); available as option on AKS (Azure CNI powered by Cilium) and EKS (via add-on; AWS VPC CNI remains the EKS default) |
 | **Pixie** | Auto-instrumented APM, service maps, no SDKs |
 | **Grafana Beyla** | Emits OpenTelemetry spans/metrics from any HTTP/gRPC binary, no SDK |
 | **Parca / Pyroscope** | Continuous CPU profiling (Java, Go, Python, native) via eBPF stack walks |
@@ -686,7 +686,7 @@ A service mesh externalizes service-to-service concerns — mTLS, retries, timeo
 | Security blast radius | Isolated per pod | Shared per node -> stricter node hardening required |
 | Maturity (2026) | Very mature | Production-ready; Istio Ambient GA, Cilium Service Mesh GA |
 
-**Performance (2026 benchmarks)**: Under low-to-mid load, Linkerd's lightweight sidecar still leads. Under high load (thousands of RPS) and with mTLS enabled, **Istio Ambient** shows the best latency — mTLS overhead ~8% vs ~33% for Linkerd sidecar and ~166% for classic Istio sidecar. Cilium (eBPF L4) is fastest when L7 features aren't needed.
+**Performance (2026 benchmarks)**: Under low-to-mid load, Linkerd's lightweight sidecar still leads. Under high load (thousands of RPS) and with mTLS enabled, **Istio Ambient** shows the best latency. Ambient mode reduces per-pod sidecar overhead significantly; published benchmarks vary widely — consult Istio/Linkerd's own performance docs for current numbers. Cilium (eBPF L4) is fastest when L7 features aren't needed.
 
 ### Mesh Comparison
 
@@ -745,7 +745,7 @@ Spring Boot is no longer the only serious choice. **Quarkus** (Red Hat) and **Mi
 
 | Service | Use Case |
 |---------|----------|
-| SQS | Simple message queue, decoupling, exactly-once (FIFO) |
+| SQS | Simple message queue, decoupling, exactly-once *processing* within a 5-minute deduplication window (FIFO queues only) |
 | SNS | Fan-out pub/sub notifications |
 | Kinesis | Real-time data streaming, ordered per shard |
 | EventBridge | Event routing with rules/filtering |

@@ -8,7 +8,7 @@
 
 ### Memory Model (JMM)
 
-The Java Memory Model defines how threads interact through memory. Every thread has a **working memory** (CPU cache) and communicates via **main memory** (heap).
+The Java Memory Model defines how threads interact through memory. Every thread has a **working memory** (an abstraction that may be implemented via CPU caches, registers, or store buffers) and communicates via **main memory** (heap).
 
 **Happens-Before Relationship**: If action A happens-before action B, then A's results are visible to B. Key rules:
 - Program order within a thread
@@ -34,7 +34,7 @@ volatile boolean flag = false;
 ```
 ┌──────────────────────────────────────────┐
 │              Class Loader                │
-│   Bootstrap → Extension → Application   │
+│   Bootstrap → Platform → Application    │
 ├──────────────────────────────────────────┤
 │           Runtime Data Areas             │
 │  ┌──────┐ ┌──────┐ ┌──────┐ ┌────────┐  │
@@ -113,7 +113,7 @@ public class HotSwapClassLoader extends ClassLoader {
 | Performance | Fast-path on uncontended locks | Slightly better under high contention |
 | Virtual thread friendliness | Pins carrier before JDK 24; non-pinning since JDK 24 (JEP 491) | Never pins |
 
-**synchronized internals**: Uses object header's mark word. States: unlocked → thin (CAS spin) → fat (OS mutex). Biased locking was **disabled by default in Java 15 (JEP 374) and removed outright in later releases** because it complicated the safepoint/pause machinery and no longer paid for itself on modern hardware.
+**synchronized internals**: Uses object header's mark word. States: unlocked → thin (CAS spin) → fat (OS mutex). Biased locking was **disabled by default and deprecated in Java 15 (JEP 374)** because it complicated the safepoint/pause machinery and no longer paid for itself on modern hardware. The implementation code remains in the JVM but is off by default — it has not been removed outright as of the current JDK.
 
 ```java
 // ReentrantLock with multiple conditions
@@ -135,10 +135,10 @@ public void put(E item) throws InterruptedException {
 
 ### java.util.concurrent Key Classes
 
-**ConcurrentHashMap** (Java 8+): Uses CAS + synchronized on individual bins (not segments). Tree bins for long chains (>8 elements). `computeIfAbsent` is atomic. **Risk**: Recursive `computeIfAbsent` on same key → deadlock.
+**ConcurrentHashMap** (Java 8+): Uses CAS + synchronized on individual bins (not segments). Tree bins for long chains (>8 elements, and only when the table length is ≥ `MIN_TREEIFY_CAPACITY=64` — same rule as HashMap: treeify only if bucket size > 8 AND table length ≥ 64, otherwise the table is resized instead). `computeIfAbsent` is atomic. **Risk**: Recursive `computeIfAbsent` on same key → throws `IllegalStateException` ("Recursive update") since Java 9.
 
 ```java
-// DEADLOCK with ConcurrentHashMap
+// IllegalStateException ("Recursive update") with ConcurrentHashMap (since Java 9)
 map.computeIfAbsent("key", k -> map.computeIfAbsent("key", k2 -> "value"));
 ```
 
@@ -210,7 +210,7 @@ try (var scope = new StructuredTaskScope.ShutdownOnFailure()) {
 
 - **Buckets**: Array of `Node<K,V>[]`, default initial capacity 16, load factor 0.75
 - **Hashing**: `hash(key)` spreads high bits → `(n-1) & hash` for bucket index
-- **Collision**: Linked list → **TreeMap (Red-Black tree)** when chain length > 8 (TREEIFY_THRESHOLD) and table size ≥ 64
+- **Collision**: Linked list → **TreeNode (Red-Black tree)** when chain length > 8 (TREEIFY_THRESHOLD) and table size ≥ 64
 - **Resize**: Doubles capacity, rehashes all entries. **Not thread-safe** — concurrent put can cause infinite loop (Java 7 head-insert) or data loss (Java 8+)
 
 ### ConcurrentHashMap vs Collections.synchronizedMap

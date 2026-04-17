@@ -264,6 +264,10 @@ class Car extends Vehicle {
         super(vin, year); // MUST be first statement
         this.doors = doors;
     }
+    // Note: Since Java 25 (JEP 513, flexible constructor bodies), statements are
+    // permitted before `super(...)` / `this(...)` for prologue validation — the
+    // call still cannot be moved out of the constructor, but the "first statement"
+    // rule is relaxed.
 
     Car(String vin, int year) {
         this(vin, year, 4); // Delegate to another constructor
@@ -493,7 +497,9 @@ Shape vtable:         Circle vtable:         Rectangle vtable:
 
 `shape.area()` → JVM checks actual type (Circle) → looks up Circle's vtable → calls `Circle.area()`.
 
-**`final` methods skip vtable dispatch** — the JVM knows the exact implementation at compile time, enabling inlining.
+**`final` methods skip vtable dispatch** — the JVM knows the exact implementation at JIT time (javac still emits `invokevirtual`; the JIT devirtualizes and inlines), enabling inlining.
+
+**vtable vs itable**: Interface dispatch uses itables (interface method tables), which are separate from class vtables — `invokeinterface` does more work than `invokevirtual` because it must locate the correct itable for the receiver's class before indexing into it.
 
 ### Polymorphism with Interfaces — Multiple Type Identity
 

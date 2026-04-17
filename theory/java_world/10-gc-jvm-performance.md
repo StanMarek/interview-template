@@ -92,18 +92,22 @@ certain operations (including most GC phases).
 - JNI calls (threads in native code are considered "at safepoint" by convention)
 - Allocation points
 
-**The safepoint problem with counted loops:**
+**The safepoint problem with counted loops (historical):**
 ```java
-// No safepoint inside this loop — JVM cannot stop this thread!
+// Pre-JDK 10: No safepoint inside this loop — JVM cannot stop this thread!
 for (int i = 0; i < hugeArray.length; i++) {
     sum += hugeArray[i];
 }
 
-// Fix: Use a long index (not a counted loop) or add explicit safepoint
+// Historical fix: Use a long index (not a counted loop) or add explicit safepoint
 for (long i = 0; i < hugeArray.length; i++) {  // long → safepoint inserted
     sum += hugeArray[i];
 }
 ```
+
+**Note:** Since JDK 10, `-XX:+UseCountedLoopSafepoints` is the default, so counted `int` loops
+DO get safepoints. This issue was historically relevant pre-JDK 10; today the concern is mostly
+gone.
 
 **Time-to-safepoint (TTSP)**: The latency between the JVM requesting a safepoint and all threads
 reaching one. Even a single slow thread (stuck in a long counted loop or paged-out memory) delays
@@ -338,8 +342,9 @@ Region A (Old)                    Region B (Old, in CSet)
 └─────────────────┘              └─────────────────┘
 ```
 
-**Memory overhead**: RSets can consume 5-20% of heap memory. The finer-grained the tracking,
-the more memory used. G1 uses a multi-level scheme:
+**Memory overhead**: RSets typically consume 1-5% of heap on modern G1 (JDK 11+); the 5-20%
+figure is legacy pre-JDK 9. The finer-grained the tracking, the more memory used. G1 uses a
+multi-level scheme:
 - Sparse: direct card list (few entries)
 - Fine: per-region card bitmap (moderate entries)
 - Coarse: single bit per region (many entries, less precise)
@@ -511,8 +516,8 @@ suboptimal because:
 - Allocation rate sensitivity: non-generational ZGC struggles if objects die quickly
   (frequent cycles needed)
 
-**Generational ZGC** (JEP 439, previewed in JDK 21, became the default in JDK 23+, and the
-non-generational mode is being removed in upcoming releases):
+**Generational ZGC** (JEP 439, previewed in JDK 21, became the default in JDK 23+; the
+non-generational mode was removed in JDK 25 (JEP 490); deprecated for removal in JDK 24 (JEP 458)):
 - Separate young and old generations, each with their own collection cycle
 - Young gen collected more frequently (fast, most objects dead)
 - Old gen collected less often (more work, but fewer cycles)
@@ -826,7 +831,7 @@ public void handleRequest(Request req) {
 task and discarded — they don't pool, so a "missing `remove()`" bug no longer leaks forever.
 But `ThreadLocal` allocates a fresh copy per virtual thread, and millions of virtual threads
 can amplify per-thread state into substantial heap pressure. Prefer **`ScopedValue`**
-(JEP 487, preview in JDK 25) for request-scoped context under virtual threads — it's
+(JEP 506, finalized in JDK 25) for request-scoped context under virtual threads — it's
 immutable, inherited by child structured-concurrency tasks, and doesn't require cleanup.
 
 **4. Classloader leaks (common in application servers):**
@@ -856,7 +861,10 @@ public byte[] readFile(String path) throws IOException {
 
 **6. String.intern() abuse:**
 ```java
-// LEAK: interned strings live in the string pool (old gen) forever
+// LEAK: the string table (hash table of interned entries) lives in native memory since
+// JDK 7; the interned String objects themselves live in the regular Java heap and are
+// subject to GC once unreachable. But as long as the table entries remain reachable from
+// somewhere, interned strings stay alive.
 for (String data : hugeDataSet) {
     processedData.add(data.intern());  // millions of unique strings interned
 }
@@ -1144,13 +1152,14 @@ Execution Flow:
 Code         Interpreter ──────────────────► Machine Code
 Behavior     (slow, no optimization)         (fast, optimized)
 
-Tiers:
+Tiers (per HotSpot source):
 ┌─────────────┬──────────────────────────────────────────────────┐
 │ Tier 0      │ Interpreter — all methods start here             │
-│ Tier 1      │ C1 with full instrumentation (profiling)         │
-│ Tier 2      │ C1 with limited instrumentation                  │
-│ Tier 3      │ C1 with full instrumentation (typical C1 level)  │
-│ Tier 4      │ C2 with aggressive optimizations                 │
+│ Tier 1      │ C1 WITHOUT profiling (trivial methods, no counters)│
+│ Tier 2      │ C1 with invocation + backedge counters only      │
+│             │ (limited profiling)                              │
+│ Tier 3      │ C1 with FULL profiling (the normal C1 tier)      │
+│ Tier 4      │ C2 — fully optimized                             │
 └─────────────┴──────────────────────────────────────────────────┘
 ```
 
@@ -1163,8 +1172,9 @@ aggressive optimizations based on profiling data collected during C1 execution.
 ### Compilation Thresholds and OSR
 
 Methods are compiled when they exceed an invocation threshold:
-- Default: ~10,000 invocations (or back-edge count for loops)
-- `-XX:CompileThreshold=<n>` (not directly used with tiered compilation)
+- With tiered compilation (default since JDK 8): `Tier3InvocationThreshold=200`,
+  `Tier4InvocationThreshold=5000`.
+- The legacy `CompileThreshold=10000` applies only with `-XX:-TieredCompilation`.
 
 **On-Stack Replacement (OSR)**: For long-running loops that were entered via the interpreter,
 the JVM can compile the loop body and replace the running interpreted frame with compiled
@@ -1205,7 +1215,7 @@ public int sumPoints(int x1, int y1, int x2, int y2) {
 
 Enables three optimizations:
 1. **Scalar replacement**: Replace the object with its fields as local variables (no allocation)
-2. **Stack allocation**: Allocate on the stack instead of heap (rare in HotSpot, scalar replacement preferred)
+2. **Stack allocation**: HotSpot does NOT do stack allocation for objects; it does scalar replacement only (object broken into primitive fields in registers/stack slots)
 3. **Lock elision**: Remove synchronization on non-escaping objects
 
 ```java
@@ -1288,8 +1298,9 @@ Graal is a JIT compiler written in Java (as opposed to C2, which is written in C
   on another path)
 - Foundation for GraalVM (polyglot runtime, native-image AOT compilation)
 
-**History caveat (important in 2026):** the Galahad / "Graal JIT in-tree" experiment was
-removed from OpenJDK in JDK 21 (JEP 410). The in-JDK `-XX:+UseJVMCICompiler` flag still exists
+**History caveat (important in 2026):** the experimental AOT and JIT compiler (including the
+in-tree Graal JIT) was removed from OpenJDK in JDK 17 via JEP 410 ("Remove the Experimental
+AOT and JIT Compiler"). The in-JDK `-XX:+UseJVMCICompiler` flag still exists
 but is hollow on recent builds. If you want Graal as a JIT, run GraalVM itself (Oracle GraalVM
 or community "Mandrel" builds for Native Image) — otherwise you're on HotSpot C1/C2.
 

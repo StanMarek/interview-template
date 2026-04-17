@@ -461,15 +461,18 @@ Flux.range(1, 5)
     }))
     .contextWrite(Context.of("userId", "user-42"));
 
-// Context flows upstream (from bottom to top in the chain)
+// Context flows UPSTREAM (from subscribe() up toward the source)
 Mono.just("data")
     .flatMap(d -> Mono.deferContextual(ctx -> {
-        // "key" = "value2" — closest contextWrite downstream wins
+        // "key" = "value1" — Context propagates UPSTREAM, so the contextWrite
+        // written LATER in the chain (closer to subscribe) is applied FIRST
+        // when walking upstream. The earlier contextWrite then overwrites it,
+        // so by the time context reaches the deferContextual above, the value is "value1".
         return Mono.just(d + ctx.get("key"));
     }))
-    .contextWrite(Context.of("key", "value2"))   // This one is seen
-    .contextWrite(Context.of("key", "value1"))   // This one is further downstream
-    .subscribe(System.out::println);  // "datavalue2"
+    .contextWrite(Context.of("key", "value2"))   // Applied SECOND walking upstream (overwrites)
+    .contextWrite(Context.of("key", "value1"))   // Applied FIRST walking upstream (closer to subscribe)
+    .subscribe(System.out::println);  // "datavalue1"
 ```
 
 ### Orchestrating Multiple Service Calls
@@ -576,7 +579,7 @@ Reactor is **concurrency-agnostic by default** — operators execute on the thre
 | Scheduler | Threads | Typical Size | Use Case |
 |-----------|---------|--------------|----------|
 | `Schedulers.parallel()` | Bounded, non-blocking | `Runtime.getRuntime().availableProcessors()` | Short CPU-bound work, non-blocking compute |
-| `Schedulers.boundedElastic()` | Bounded, elastic, blocking-safe | `10 * CPUs` workers, 100k queued tasks | Wrapping **blocking I/O** (JDBC, legacy clients) |
+| `Schedulers.boundedElastic()` | Bounded, elastic, blocking-safe | Default size `10 * Runtime.getRuntime().availableProcessors()` threads; cap **100,000 queued tasks total** (not per worker) | Wrapping **blocking I/O** (JDBC, legacy clients) |
 | `Schedulers.single()` | 1 reusable thread | 1 | Low-latency one-off tasks, serialized work |
 | `Schedulers.immediate()` | Caller's thread | n/a | Composition, testing, "no hop" semantics |
 | `Schedulers.fromExecutor(exec)` | Whatever `exec` provides | Custom | Integrate existing `ExecutorService` (e.g., virtual threads) |
@@ -858,7 +861,7 @@ public class ChatWebSocketHandler implements WebSocketHandler {
 | Criteria | Spring MVC | Spring WebFlux |
 |----------|-----------|----------------|
 | Programming model | Imperative, blocking | Reactive, non-blocking |
-| Server | Tomcat, Jetty (servlet) | Netty, Undertow (non-blocking) |
+| Server | Tomcat, Jetty (servlet) | Netty (default, reactor-netty), Undertow, Jetty (reactive), and Tomcat (via Servlet 3.1+ async non-blocking I/O) |
 | Threading | Thread-per-request | Event loop (few threads) |
 | Database access | JDBC, JPA (blocking) | R2DBC (non-blocking) |
 | Concurrency (pre-Loom) | Hundreds to low thousands | Tens of thousands |
@@ -1350,7 +1353,7 @@ Hooks.enableAutomaticContextPropagation();
 // around reactive operator boundaries, keyed by ContextAccessor SPI.
 ```
 
-Note: Reactor 3.7 removed automatic `ThreadLocal` restoration inside `handle`/`tap` operators — instead, wrap the target callback with `ContextSnapshot.wrap(...)` explicitly when restoration is needed there.
+Note: Reactor 3.7+ uses Micrometer Context Propagation for explicit `ThreadLocal` ↔ `Context` bridging. `ThreadLocal` restoration around operators requires `Hooks.enableAutomaticContextPropagation()` to be enabled; otherwise wrap the target callback with `ContextSnapshot.wrap(...)` explicitly where restoration is needed.
 
 ---
 
@@ -1389,7 +1392,7 @@ When a virtual thread encounters a blocking I/O operation, it **unmounts** from 
 
 | Aspect | Platform Threads | Virtual Threads | Reactive (Reactor/WebFlux) |
 |--------|-----------------|-----------------|---------------------------|
-| **Scalability** | ~5,000 concurrent | ~1,000,000+ concurrent | ~1,000,000+ concurrent |
+| **Scalability** | ~few thousand to ~10K concurrent (stack default 512KB–1MB; depends on OS limits) | ~1,000,000+ concurrent | ~1,000,000+ concurrent |
 | **Memory per task** | ~1 MB stack | ~few KB | Negligible (shared event loop) |
 | **Programming model** | Imperative, blocking | Imperative, blocking | Functional, non-blocking |
 | **Learning curve** | Low | Low | High |
@@ -1409,7 +1412,7 @@ When a virtual thread encounters a blocking I/O operation, it **unmounts** from 
 - Teams without reactive experience — virtual threads preserve familiar imperative code, debuggers, and profilers
 - Applications where backpressure and streaming are not requirements
 - Brownfield projects with existing blocking codebases — virtual threads require close to zero refactoring
-- CRUD services where the 2026 data shows migration from WebFlux delivers ~35% LOC reduction and dramatic debugging-time improvements
+- CRUD services where migration from WebFlux to virtual threads is often simpler code (imperative style) with easier debugging. Exact LOC reduction depends heavily on the codebase and is not a fixed number.
 
 ### When Reactive Still Wins
 

@@ -71,9 +71,9 @@ During a **network partition**, you must choose between **Consistency** and **Av
 
 | System | P | E |
 |--------|---|---|
-| DynamoDB | PA | EL (tunable) |
+| DynamoDB | PA | EL (DynamoDB offers only strong vs eventually-consistent reads — not fully tunable quorum like Cassandra) |
 | Cassandra | PA | EL |
-| MongoDB | PC | EC |
+| MongoDB | PC | EC (CP only with `writeConcern: majority`; default `w:1` can lose acknowledged writes on primary failover) |
 | Spanner | PC | EC (uses TrueTime) |
 | CockroachDB | PC | EC |
 
@@ -81,7 +81,8 @@ During a **network partition**, you must choose between **Consistency** and **Av
 
 | Model | Guarantee | Example |
 |-------|-----------|---------|
-| Linearizable (strict) | Operations appear atomic; real-time order preserved | Spanner, etcd, single-leader DB |
+| Strict consistency | Theoretical only — requires instantaneous global propagation | — |
+| Linearizability | Per Herlihy/Wing — strongest practically-achievable model, each operation appears to take effect at a single point between invocation and response | Spanner, etcd, single-leader DB |
 | Sequential | Same order seen by all, but not real-time | — |
 | Causal | Causally-related ops ordered; concurrent ops may differ | Riak, CRDTs |
 | Read-your-writes | Client sees its own writes | Session consistency |
@@ -99,7 +100,7 @@ During a **network partition**, you must choose between **Consistency** and **Av
 | **Multi-Paxos / EPaxos** | Optimizations for throughput and leaderless operation. |
 | **ZAB** | ZooKeeper atomic broadcast — similar to Raft. |
 
-Consensus requires **quorum** (N/2 + 1 nodes). Tolerates `f` failures with `2f + 1` nodes. Cluster sizes 3, 5, 7 — even numbers waste a node.
+Consensus requires **quorum** (N/2 + 1 nodes). Tolerates `f` failures with `2f + 1` nodes. Cluster sizes 3, 5, 7 — odd cluster sizes are preferred; even-numbered clusters not only waste a node but also increase split-vote probability during elections.
 
 ### Leader Election
 
@@ -205,7 +206,7 @@ Distributes keys across nodes with minimal redistribution on node changes. Stand
 | Model | Partitioned log | AMQP queues + exchanges | Managed queue | Log + tiered storage |
 | Throughput | Very high (~1M msgs/s) | High (~30-50K msgs/s) | High, opaque scale | Very high |
 | Latency | Low (~5ms) | Very low (<1ms) | 10-100ms (managed) | Low |
-| Ordering | Per partition | Per queue (best effort) | FIFO queues only | Per partition |
+| Ordering | Per partition | Strict FIFO per queue at broker level; consumer-side ordering is best-effort with multiple consumers, requeues, or priority queues | FIFO queues only | Per partition |
 | Retention | Long (days-years) | Short (consume & ack) | 14 days max | Infinite (BookKeeper tiered to S3) |
 | Delivery | At-least / exactly-once (txn) | At-least / at-most | At-least / FIFO exactly-once | At-least / effectively-once |
 | Best for | Event streaming, replay, analytics | Complex routing, RPC, low-latency tasks | Simple AWS workloads | Multi-tenant, geo-replication |
@@ -315,7 +316,7 @@ Producer → Topic (partitioned) → Consumer Group
           P2: [msg4, msg7, ...]    Consumer 3 ← P2
 ```
 
-Each partition is an ordered, immutable append-only log. Messages identified by offset. Partitions are replicated across brokers (ISR = In-Sync Replicas). Since Kafka 3.3+ (KRaft GA) and now standard in 2026, ZooKeeper is gone — controllers are Raft-based.
+Each partition is an ordered, immutable append-only log. Messages identified by offset. Partitions are replicated across brokers (ISR = In-Sync Replicas). KRaft went GA for new clusters in Kafka 3.3 (Oct 2022); ZooKeeper mode was fully removed in Kafka 4.0 (March 2025). KRaft is an event-driven Raft variant, not vanilla Raft.
 
 ### Key Guarantees
 
@@ -454,7 +455,7 @@ eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4ifQ.signature
 - **Token size**: JWTs grow with claims. Large JWTs increase bandwidth on every request.
 - **Revocation**: JWTs can't be revoked before expiry. Use short expiry + refresh tokens, or maintain a token blocklist (defeats statelessness).
 
-### OWASP Top 10 Awareness (2021 list — current as of 2026 edition due in late 2026)
+### OWASP Top 10 Awareness (2021 list; the 2025 edition is in release-candidate stage as of early 2026)
 
 | Vulnerability | Prevention |
 |--------------|------------|
@@ -584,7 +585,7 @@ Async:       Offline eval, index refresh, feedback capture
 
 ### Trade-offs to Articulate
 
-- **Latency budget**: Embed (~10ms) + vector search (~10-50ms) + LLM (~500-3000ms). LLM dominates.
+- **Latency budget**: Embed (~10ms) + vector search (~10-50ms) + LLM time-to-first-token (TTFT): ~200-500ms for frontier models; full generation can take several seconds depending on output length. LLM dominates.
 - **Token cost**: context window × price/token × QPS → $$. Cache aggressively.
 - **Hallucinations**: Ground responses in retrieved context; require citations; evaluate with LLM-as-judge + human review.
 - **Freshness vs cost**: Re-embed on every doc change (expensive) vs scheduled batch reindex.

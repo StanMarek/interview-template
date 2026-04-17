@@ -1,6 +1,6 @@
 # Security for Java Applications — Senior Engineer Interview Preparation
 
-> **April 2026 context.** This guide targets Java 24/25 and Spring Security 6.5.x / 7.0.x. Key recent events: Security Manager **permanently disabled** in Java 24 ([JEP 486](https://openjdk.org/jeps/486)), Key Derivation Function API added ([JEP 478](https://openjdk.org/jeps/478), finalized in JEP 510), post-quantum primitives ML-KEM / ML-DSA shipped ([JEP 496](https://openjdk.org/jeps/496), [JEP 497](https://openjdk.org/jeps/497)), hybrid PQ TLS 1.3 in progress ([JEP 527](https://openjdk.org/jeps/527)), OWASP Top 10 **2025 edition** released November 2025, and OAuth 2.1 now standard for new deployments. `WebSecurityConfigurerAdapter` has been gone since Spring Security 5.8 — all configs are component-based (`SecurityFilterChain` + lambda DSL).
+> **April 2026 context.** This guide targets Java 24/25 and Spring Security 6.5.x / 7.0.x. Key recent events: Security Manager **permanently disabled** in Java 24 ([JEP 486](https://openjdk.org/jeps/486)), Key Derivation Function API added ([JEP 478](https://openjdk.org/jeps/478), finalized in JEP 510 — HKDF only; Argon2/scrypt tracked in a separate draft JEP, not yet targeted to a release), post-quantum primitives ML-KEM / ML-DSA shipped ([JEP 496](https://openjdk.org/jeps/496), [JEP 497](https://openjdk.org/jeps/497)), hybrid PQ TLS 1.3 in progress ([JEP 527](https://openjdk.org/jeps/527)), OWASP Top 10 **2025 edition** released November 2025, and OAuth 2.1 drafting ongoing with 2.1 BCPs layered on top of OAuth 2.0 in modern deployments. `WebSecurityConfigurerAdapter` has been gone since Spring Security 5.8 — all configs are component-based (`SecurityFilterChain` + lambda DSL).
 
 ---
 
@@ -125,7 +125,7 @@ Senior engineers are expected to know these modernization milestones — coming 
 - **OAuth 2.0 DPoP** (Demonstrating Proof of Possession) — sender-constrained tokens that cryptographically bind an access token to a client-held private key. Defeats bearer-token theft.
 - **PKCE for confidential clients** — `ClientRegistration.clientSettings.requireProofKey=true` is now a one-liner.
 - **Passkeys / WebAuthn DSL** — first-class `http.webAuthn(...)` configurer with customizable `HttpMessageConverter`.
-- **Micrometer context propagation** — the SecurityContext is now propagated automatically across reactive/virtual-thread boundaries via the Micrometer Context Propagation library.
+- **Micrometer context propagation** — Automatic propagation requires Micrometer Context Propagation wiring (`Hooks.enableAutomaticContextPropagation()` for Reactor; ThreadLocal snapshot capture for virtual threads).
 - **Observability key rename** — `security.security.reached.filter.section` → `spring.security.reached.filter.section` (fix if you have Grafana dashboards).
 - **`AuthorizationManager`** is the extension point for custom authz: return `new AuthorizationDecision(boolean)` from a `check(Supplier<Authentication>, T)` method and plug in via `.access(myAuthzManager)`.
 
@@ -593,7 +593,7 @@ public class JwtTokenProvider {
 
 ### OAuth 2.1 — The Consolidation (what you need to know in 2026)
 
-OAuth 2.1 is a **Best Current Practice consolidation** of OAuth 2.0 + a decade of security guidance (RFC 6749, 6750, 7636, 8252, 8628, 9068, 9126). It is still in late-stage IETF draft but is already what every modern authorization server (Auth0, Keycloak, Okta, Azure AD, Cognito) implements and what new systems should target.
+OAuth 2.1 is a **Best Current Practice consolidation** of OAuth 2.0 + a decade of security guidance (RFC 6749, 6750, 7636, 8252, 8628, 9068, 9126). OAuth 2.1 is still in IETF draft as of 2026; most modern authorization servers implement OAuth 2.0 with 2.1 security BCPs layered on (e.g., PKCE required, implicit flow removed).
 
 | Change | OAuth 2.0 | OAuth 2.1 |
 |--------|-----------|-----------|
@@ -1307,7 +1307,7 @@ MD5 and SHA-family hashes are **general-purpose hash functions** designed to be 
 
 | Algorithm | Mechanism | Memory-Hard | Notes |
 |-----------|-----------|-------------|-------|
-| **Argon2id** | Winner of Password Hashing Competition (2015), RFC 9106 | Yes | **Current OWASP #1 recommendation.** Hybrid of Argon2i and Argon2d — resists GPU/ASIC and side-channel. Now a first-class algorithm in the JDK 24+ KDF API (JEP 478). |
+| **Argon2id** | Winner of Password Hashing Competition (2015), RFC 9106 | Yes | **Current OWASP #1 recommendation.** Hybrid of Argon2i and Argon2d — resists GPU/ASIC and side-channel. Argon2id is not yet in the standard JDK API as of Java 25. Use BouncyCastle or Spring Security's `Argon2PasswordEncoder` (wraps BC) for Argon2 support. |
 | **scrypt** | Sequential memory-hard | Yes | Good fallback where Argon2 unavailable. Resistant to GPU/ASIC. |
 | **bcrypt** | Blowfish-based, 128-bit salt | No | Still widely deployed, still acceptable at cost ≥ 12. Maximum password length of 72 bytes is a footgun — either reject longer passwords or pre-hash with SHA-256 before bcrypt. |
 | **PBKDF2-HMAC-SHA256** | Iterated HMAC | No | FIPS-approved; use only when compliance requires it (600,000+ iterations in 2025 per NIST SP 800-63B revision 4). Not memory-hard — weak against GPU attacks. |
@@ -1346,7 +1346,7 @@ BCrypt cost factor: 2^cost iterations
 
 ### Spring Security PasswordEncoder
 
-The idiomatic 2026 setup uses **`DelegatingPasswordEncoder` with Argon2id as the default** — this lets you upgrade algorithms over time while still verifying legacy hashes. New hashes are prefixed with `{argon2}`; old `{bcrypt}` or `{pbkdf2}` hashes still validate, and `upgradeEncoding()` transparently rehashes on successful login.
+The `DelegatingPasswordEncoder` returned by `PasswordEncoderFactories.createDelegatingPasswordEncoder()` uses **bcrypt** (`{bcrypt}`) as the encoding ID for new passwords. Argon2, PBKDF2, scrypt are supported as decoder entries but bcrypt remains the default encoder. You can override via `new DelegatingPasswordEncoder("argon2", encoders)` if you want Argon2id for new hashes. This lets you upgrade algorithms over time while still verifying legacy hashes, and `upgradeEncoding()` transparently rehashes on successful login.
 
 ```java
 @Configuration
@@ -1385,7 +1385,7 @@ public class PasswordConfig {
 
 ### KDF API (JEP 478, JDK 24+)
 
-Java 24 introduced `javax.crypto.KDF` — a first-class API for **Key Derivation Functions** (HKDF today, Argon2 and scrypt added via finalization in JEP 510). This is separate from password hashing (use `PasswordEncoder`) — it is for deriving cryptographic keys from passwords, shared secrets, or other high-entropy material. The API is a building block for Hybrid Public Key Encryption (HPKE) and post-quantum key agreement.
+Java 24 introduced `javax.crypto.KDF` — a first-class API for **Key Derivation Functions**. JEP 510 (Java 25) ships **HKDF only**. Argon2 and scrypt are tracked in a separate draft JEP (not yet targeted to a release). The `KDF` API is for key derivation, not password hashing — Argon2 as a password-hashing KDF remains in proposal stage. This is separate from password hashing (use `PasswordEncoder`) — it is for deriving cryptographic keys from passwords, shared secrets, or other high-entropy material. The API is a building block for Hybrid Public Key Encryption (HPKE) and post-quantum key agreement.
 
 ```java
 // Derive a session key from an ECDH shared secret using HKDF-SHA256 (JEP 478)
@@ -1514,18 +1514,20 @@ Client                                Server
   |      key share, TLS version)         |
   |------------------------------------->|
   |                                      |
-  |  2. ServerHello                      |
-  |     (selected cipher suite,          |
-  |      key share, certificate)         |
+  |  2. Server Hello → {EncryptedExtensions,
+  |     Certificate, CertificateVerify,  |
+  |     Finished} (all encrypted under   |
+  |     handshake keys in flight 2)      |
   |<-------------------------------------|
   |                                      |
   |  [Both derive session keys from      |
   |   key shares via ECDHE]              |
   |                                      |
-  |  3. Client Finished (encrypted)      |
+  |  3. Client sends Finished            |
+  |     (flight 3)                       |
   |------------------------------------->|
   |                                      |
-  |  4. Application Data (encrypted)     |
+  |  4. 1-RTT Application Data follows   |
   |<------------------------------------>|
 ```
 
@@ -1924,7 +1926,7 @@ cosign verify ghcr.io/myorg/myapp@sha256:abc123... \
 | Change | JEP / Version | Senior-interview relevance |
 |--------|---------------|----------------------------|
 | **Security Manager permanently disabled** | [JEP 486](https://openjdk.org/jeps/486), Java 24 | You cannot call `System.setSecurityManager()` — it throws `UnsupportedOperationException`. Do not propose Security Manager as a sandbox in interview answers; it is gone. Stub `java.lang.SecurityManager` remains only for compile-time compatibility |
-| **Key Derivation Function API** | [JEP 478](https://openjdk.org/jeps/478) (preview, Java 24) → [JEP 510](https://openjdk.org/jeps/510) (final, Java 25) | First-class `javax.crypto.KDF` API. HKDF in 24, Argon2/scrypt in 25 |
+| **Key Derivation Function API** | [JEP 478](https://openjdk.org/jeps/478) (preview, Java 24) → [JEP 510](https://openjdk.org/jeps/510) (final, Java 25) | First-class `javax.crypto.KDF` API. JEP 510 ships HKDF only; Argon2 and scrypt are in a separate draft JEP, not yet targeted to a release |
 | **ML-KEM (Kyber)** key encapsulation | [JEP 496](https://openjdk.org/jeps/496), Java 24 | Post-quantum KEM for key exchange (FIPS 203) |
 | **ML-DSA (Dilithium)** signatures | [JEP 497](https://openjdk.org/jeps/497), Java 24 | Post-quantum signatures (FIPS 204) |
 | **Hybrid PQ Key Exchange for TLS 1.3** | [JEP 527](https://openjdk.org/jeps/527), targeted Java 26 | `X25519MLKEM768` cipher in TLS — classical ECDH + ML-KEM so you are safe if either side breaks |
@@ -2080,8 +2082,9 @@ CSRF exploits the browser's automatic inclusion of cookies on cross-origin reque
 
 CSRF protection can be safely disabled when:
 - The API uses **stateless authentication** (JWT in Authorization header, not cookies) -- if no cookies carry authentication, CSRF is not possible
-- The API only accepts `Content-Type: application/json` -- browsers cannot send JSON via simple form submission (requires preflight, which is blocked by CORS)
-- All cookies use `SameSite=Strict` or `SameSite=Lax` -- the browser itself prevents cross-origin cookie sending
+- All cookies use `SameSite=Strict` -- the browser itself prevents cross-origin cookie sending
+
+**Misconception**: A cross-origin JSON POST still triggers a CORS preflight, but preflight only prevents the browser from SENDING the request if the server lacks matching CORS headers. It does NOT protect against CSRF in all cases — e.g., same-origin iframes, subdomains with lax SameSite cookies, or server-side attacker requests bypass this entirely. Always use CSRF tokens for state-changing operations unless you rely on SameSite=Strict cookies AND are certain subdomains can't be compromised.
 
 It should NOT be disabled for traditional form-based web applications that use session cookies.
 

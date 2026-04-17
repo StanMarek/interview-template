@@ -219,11 +219,14 @@ void shouldDetectPalindrome(String candidate) {
     "1, 1, 2",
     "0, 0, 0",
     "-1, 1, 0",
-    "Integer.MAX_VALUE, 1, 2147483648"
+    "2147483647, 1, 2147483648"
 })
 void shouldAddNumbers(long a, long b, long expected) {
     assertThat(a + b).isEqualTo(expected);
 }
+// Note: @CsvSource values are parsed as strings/literals — Java expressions like
+// `Integer.MAX_VALUE` are NOT interpolated. Use literal values, or switch to
+// @MethodSource if you need expression-level values.
 
 // @MethodSource — complex objects
 @ParameterizedTest
@@ -408,8 +411,9 @@ The JUnit team ships roughly one minor release per quarter. Knowing the recent a
 |---------------|-------------------------------------------------------------------------------------------------------|
 | 5.11 (2024)   | `@AutoClose` on fields, stricter field/method visibility semantics, `@TempDir` cleanup hardening      |
 | 5.12 (Feb 2025)| Thread dumps on test timeout, parameterised test validation, reduced thread contention for parallel runs |
-| 5.13 (2025)   | `@ClassTemplate` / `@ParameterizedClass` — stable API for parameterising whole classes; Kotlin `Sequence` support |
-| 5.14 / 6.0    | Baseline Java 17, new `ConsumerArgumentsProvider`, richer `@ParameterizedClass` lifecycle             |
+| 5.13 (2025)   | `@ClassTemplate` / `@ParameterizedClass` introduced as `@API(status=EXPERIMENTAL)` — treat as unstable until promoted to MAINTAINED/STABLE in a later release; Kotlin `Sequence` support |
+| 5.14          | New `ConsumerArgumentsProvider`, richer `@ParameterizedClass` lifecycle. JUnit 5.x remains Java 8 baseline. |
+| 6.0 (Sept 2025) | Baseline raised to Java 17. |
 
 ```java
 // @AutoClose — replaces manual @AfterEach close()
@@ -471,8 +475,8 @@ Mockito 5 (2023) is the current baseline and what you should default to in 2026.
 
 | Change                               | Impact                                                                                   |
 |--------------------------------------|------------------------------------------------------------------------------------------|
-| Default `MockMaker` = `mockito-inline` | `mockStatic`, `mockConstruction`, final classes, and `final` methods work out of the box — **no more `mockito-inline` dependency**. The legacy `mockito-core` subclass mock maker still ships as `mockito-subclass`. |
-| Minimum JDK 11 (5.x), 17 (current 5.15+) | Old `PowerMock` / `PowerMockito` hacks are gone for good — just use built-in static mocking. |
+| Default `MockMaker` = **inline** | Mockito 5.x defaults to the **inline** MockMaker. The separate `mockito-inline` artifact was removed — `mockito-core` now ships inline as the default. `mockStatic`, `mockConstruction`, final classes, and `final` methods work out of the box. The legacy subclass mock maker still ships as `mockito-subclass`. |
+| Minimum JDK 11 | Mockito 5.x baseline is JDK 11. No version bump to JDK 17 has occurred as of 5.15. Old `PowerMock` / `PowerMockito` hacks are gone for good — just use built-in static mocking. |
 | `STRICT_STUBS` is the default        | Unused stubs throw `UnnecessaryStubbingException` at the end of the test.                |
 | Mocking Java records works natively  | Records are final — Mockito 5 handles them via the inline mock maker.                    |
 | PowerMock is **deprecated / unmaintained** | Do not introduce PowerMock in new code. Refactor to constructor injection + `mockStatic`. |
@@ -637,7 +641,7 @@ void shouldApplyDiscountForPremiumCustomer() {
 `STRICT_STUBS` is the default when using `MockitoExtension`. It fails the test if:
 
 - A stubbed method is **never called** (`UnnecessaryStubbingException`).
-- `verify()` is called with different arguments than what was actually invoked (`PotentialStubbingProblem`).
+- A stubbed method is called with arguments that don't match any configured stubbing — `PotentialStubbingProblem` fires at **stubbing-invocation time**, not during verify. `verify()` mismatches throw `ArgumentsAreDifferent` / `WantedButNotInvoked` — different exception, different lifecycle phase.
 
 ```java
 @ExtendWith(MockitoExtension.class)
@@ -930,7 +934,7 @@ Testcontainers ships first-class modules for most infrastructure you encounter. 
 | `postgresql`, `mysql`, `mariadb`, `oracle-free`, `mssqlserver` | Relational database ITs |
 | `kafka`, `redpanda`, `confluent-platform` | Kafka producers/consumers        |
 | `mongodb`, `cassandra`, `elasticsearch`, `neo4j` | NoSQL ITs                  |
-| `localstack`                | AWS (S3, SQS, SNS, DynamoDB, Lambda) — requires `LOCALSTACK_AUTH_TOKEN` since March 2026 |
+| `localstack`                | AWS (S3, SQS, SNS, DynamoDB, Lambda) — account registration enforced since March 23, 2026 (grace period with `LOCALSTACK_ACKNOWLEDGE_ACCOUNT_REQUIREMENT=1` ended April 6, 2026) |
 | `rabbitmq`, `pulsar`        | Message brokers                                    |
 | `k3s`, `vault`, `consul`    | Infrastructure / platform testing                  |
 | `wiremock` (community module)| WireMock-in-a-container with `@ServiceConnection` support |
@@ -993,8 +997,11 @@ class UserRepositoryIT {
 @SpringBootTest
 class OrderEventConsumerIT {
 
+    // Note: `org.testcontainers.containers.KafkaContainer` is deprecated —
+    // use module-specific containers from `org.testcontainers.kafka`:
+    // `ConfluentKafkaContainer` for cp-kafka images, or `KafkaContainer` for apache/kafka.
     @Container
-    static KafkaContainer kafka = new KafkaContainer(
+    static ConfluentKafkaContainer kafka = new ConfluentKafkaContainer(
         DockerImageName.parse("confluentinc/cp-kafka:7.5.0"));
 
     @DynamicPropertySource
@@ -1053,14 +1060,16 @@ Starting a container per test class is slow. The singleton pattern shares a sing
 public abstract class AbstractIntegrationTest {
 
     static final PostgreSQLContainer<?> POSTGRES;
-    static final KafkaContainer KAFKA;
+    static final ConfluentKafkaContainer KAFKA;
 
     static {
         POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine")
             .withDatabaseName("testdb");
         POSTGRES.start();
 
-        KAFKA = new KafkaContainer(
+        // `org.testcontainers.containers.KafkaContainer` is deprecated; use
+        // `org.testcontainers.kafka.ConfluentKafkaContainer` for cp-kafka.
+        KAFKA = new ConfluentKafkaContainer(
             DockerImageName.parse("confluentinc/cp-kafka:7.5.0"));
         KAFKA.start();
     }
@@ -1104,6 +1113,8 @@ class OrderServiceIT {
 
     @Container
     @ServiceConnection                            // Spring wires bootstrap-servers
+    // Use `org.testcontainers.kafka.KafkaContainer` for apache/kafka images
+    // (the old `org.testcontainers.containers.KafkaContainer` is deprecated).
     static KafkaContainer kafka =
         new KafkaContainer(DockerImageName.parse("apache/kafka:3.7.0"));
 
@@ -1414,7 +1425,7 @@ class OrderControllerTest {
 }
 ```
 
-> Note: `@MockBean` was deprecated in Spring Framework 6.2 / Spring Boot 3.4 in favour of `@MockitoBean` (Mockito) and `@MockitoSpyBean`. They sit in `org.springframework.test.context.bean.override.mockito`.
+> Note: `@MockBean` lives in Spring Boot (`org.springframework.boot.test.mock.mockito`) and is deprecated in Spring Boot 3.4 for removal in 4.0. Spring Framework 6.2 introduced the replacement `@MockitoBean` (and `@MockitoSpyBean`) in `spring-test` — they sit in `org.springframework.test.context.bean.override.mockito`.
 
 ### `@DataJpaTest` — Testing a Repository
 

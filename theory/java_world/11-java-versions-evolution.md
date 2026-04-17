@@ -55,9 +55,9 @@ Cross-link: Records, sealed types, and pattern matching are covered with example
 | Feature | Status | Senior-level summary |
 |---------|--------|----------------------|
 | `CompletableFuture` | final since 8 | Non-blocking composition. Default pool is `ForkJoinPool.commonPool` — **always pass a custom executor** for I/O. |
-| Virtual threads | **final in 21** (JEP 444) | Cheap (~1 KB stack), carrier-mounted, **for I/O only**, disposable — never pool them. JEP 491 (JDK 24) removed `synchronized` pinning; keep `synchronized` unless you need `ReentrantLock` features. |
+| Virtual threads | **final in 21** (JEP 444) | Cheap (~1 KB stack), carrier-mounted, **for I/O only**, disposable — never pool them. JEP 491 (JDK 24) eliminates monitor-based pinning on `synchronized` blocks. Native/JNI frames, FFM downcalls, and class initializer blocking can still pin. Keep `synchronized` unless you need `ReentrantLock` features. |
 | Scoped values | **final in 25** (JEP 506) | Immutable, dynamically-scoped context. Replaces `ThreadLocal` for per-request data, especially with millions of VTs. |
-| Structured concurrency | **still preview in 25** (JEP 505, 5th preview) | Treat a fan-out as one unit of work; auto-cancellation on failure. API reshaped between 21 and 25 (now `StructuredTaskScope.open(Joiner...)`). Do **not** claim it's production-final yet. |
+| Structured concurrency | **still preview in 25** (JEP 505, 5th preview) | Treat a fan-out as one unit of work; auto-cancellation on failure. API reshaped between 21 and 25 (now `StructuredTaskScope.open(Joiner...)`). As of JDK 26 (GA March 2026), structured concurrency is still preview (JEP 525, 6th preview). Finalization is targeted for a later release. Do **not** claim it's production-final yet. |
 
 **See `08-concurrency-multithreading.md §3` for virtual threads / pinning / structured concurrency internals.** In an interview, cite the key facts, not the code.
 
@@ -66,24 +66,24 @@ Cross-link: Records, sealed types, and pattern matching are covered with example
 | Topic | What to know |
 |-------|--------------|
 | **Default GC** | G1 since JDK 9. Region-based, "garbage first", mixed young+old collections. |
-| **G1 tuning defaults** | `-XX:+UseStringDeduplication` default since 18. Heap ergonomics do a reasonable job — tune `-Xmx`, `-XX:MaxGCPauseMillis` (default 200 ms) and leave the rest alone. |
-| **ZGC** | Sub-ms pauses, multi-TB heaps via colored pointers + load barriers. **Generational ZGC became default mode in 23 (JEP 474); non-generational mode removed in 24 (JEP 490).** Generational gives 2–10× less CPU for the same pause target. |
+| **G1 tuning defaults** | Requires `-XX:+UseStringDeduplication` (opt-in). Originally G1-only; extended to other collectors in later releases. Heap ergonomics do a reasonable job — tune `-Xmx`, `-XX:MaxGCPauseMillis` (default 200 ms) and leave the rest alone. |
+| **ZGC** | Sub-ms pauses, multi-TB heaps via colored pointers + load barriers. **Generational ZGC default in 23 (JEP 474); non-generational mode deprecated for removal in JDK 24 (JEP 458); removed in JDK 25 (JEP 490).** Generational gives 2–10× less CPU for the same pause target. |
 | **Shenandoah** | Red Hat's low-pause alternative. Generational mode experimental in 24 (JEP 404). Similar goals to ZGC, different implementation (Brooks pointers historically, load-reference barriers now). Pick ZGC if you're on Oracle/mainline builds; Shenandoah is fine on OpenJDK from Red Hat/Amazon. |
-| **Compact object headers** | Experimental in 24 (JEP 450), **final in 25 (JEP 519)**. Shrinks headers from 96–128 bits to 64 bits. ~10–22 % heap reduction in object-heavy workloads. Enable with `-XX:+UseCompactObjectHeaders`. |
+| **Compact object headers** | Experimental in 24 (JEP 450), **final in 25 (JEP 519)**. Shrinks headers from 96 or 128 bits (two discrete sizes depending on compressed-oops config) to 64 bits. ~10–22 % heap reduction in object-heavy workloads. Enable with `-XX:+UseCompactObjectHeaders`. |
 | **AOT class loading & method profiling** | JEP 483 (JDK 24) caches loaded/linked classes; JEP 515 (JDK 25) captures method profiles AOT. Net effect: faster startup/warmup — matters for serverless and CLI workloads. |
-| **Biased locking** | Disabled by default in 15 (JEP 374), then fully removed. If someone asks why, say: "no longer pays for itself on modern CPUs and complicated the safepoint machinery." |
+| **Biased locking** | Disabled and deprecated for removal in JDK 15 (JEP 374); full code removal has not yet occurred in a released JDK (ongoing cleanup). If someone asks why, say: "no longer pays for itself on modern CPUs and complicated the safepoint machinery." |
 
 ### 2.4 APIs
 
 | API | Introduced / changed | Notes |
 |-----|----------------------|-------|
-| **Stream additions** | `takeWhile` / `dropWhile` / `iterate` (9), `Stream.toList()` (16 — unmodifiable), `mapMulti` (16), `Collectors.teeing` (12), **Stream Gatherers final in 24 (JEP 485)**. | Prefer `stream.toList()` over `collect(toList())` for new code. Use Gatherers for sliding windows, running totals, batching. |
+| **Stream additions** | `takeWhile` / `dropWhile` (9); `Stream.iterate(seed, UnaryOperator)` shipped in Java 8, the 3-arg `Stream.iterate(seed, hasNext, next)` overload shipped in 9; `Stream.toList()` (16 — unmodifiable), `mapMulti` (16), `Collectors.teeing` (12), **Stream Gatherers final in 24 (JEP 485)**. | Prefer `stream.toList()` over `collect(toList())` for new code. Use Gatherers for sliding windows, running totals, batching. |
 | **Optional evolution** | `ifPresentOrElse` (9), `or` (9), `stream()` (9), `orElseThrow()` no-arg (10). | Return type only. Never a field or parameter. `.get()` is a smell. |
 | **`HttpClient`** | Incubator 9, **final in 11**. HTTP/2 and WebSocket. | Replaces legacy `HttpURLConnection`. JDK 26 adds HTTP/3 (JEP 517). |
 | **Foreign Function & Memory (FFM)** | Final in **22 (JEP 454)**. | Replacement for JNI and `sun.misc.Unsafe` memory access. `Arena`, `MemorySegment`, `Linker`. JNI is being restricted (JEP 472) in favour of FFM. |
 | **Class-File API** | Final in **24 (JEP 484)**. | Official replacement for ASM/Javassist for bytecode manipulation. |
 | **Sequenced collections** | **21** — `SequencedCollection`, `SequencedSet`, `SequencedMap`. | `getFirst()`, `getLast()`, `reversed()`, `addFirst/Last`. Retrofitted across `List`, `Deque`, `LinkedHashMap`, etc. |
-| **Vector API** | Still incubating (11th incubator in 26). | SIMD operations. Don't claim it's production-stable. |
+| **Vector API** | Continues incubating in JDK 26. | SIMD operations. Don't claim it's production-stable. |
 | **KDF API** | Preview in 24, **final in 25 (JEP 510)**. | HKDF etc. — first-class key-derivation. |
 
 ### 2.5 Removals / Deprecations That Still Bite
@@ -150,9 +150,9 @@ Only the ones interviewers actually ask about.
 - **Final in 25:** Virtual threads (since 21), pattern matching for `switch` (since 21), record patterns (since 21), sequenced collections (since 21), Stream Gatherers (since 24), FFM (since 22), Class-File API (since 24), **scoped values (JEP 506)**, compact object headers (JEP 519), module import declarations (JEP 511), compact source files + instance `main` (JEP 512), flexible constructor bodies (JEP 513), KDF API (JEP 510), AOT method profiling (JEP 515), JFR CPU-time profiling (JEP 509, Linux).
 - **Still preview in 25:**
   - **Structured Concurrency (JEP 505)** — 5th preview. API was reshaped between 21 and 25 (constructor-based scopes in 21–23 → factory-based `StructuredTaskScope.open(Joiner...)` from 24 onward). **Do not assume it's stable in 25.** It's extremely likely to finalize in 26, but until then you must write `--enable-preview`.
-  - **Primitive types in patterns, `instanceof`, and `switch` (JEP 507)** — 3rd preview.
-  - **PEM encodings of cryptographic objects (JEP 470)** — 1st preview.
-- **Incubator (moving target):** Vector API (11th incubator shipping in 26). Never claim this is "standard".
+  - **Primitive types in patterns, `instanceof`, and `switch` (JEP 507)** — 3rd preview. 4th preview in JDK 26.
+  - **PEM encodings of cryptographic objects (JEP 470)** — 1st preview. 2nd preview in JDK 26 (JEP 524).
+- **Incubator (moving target):** Vector API continues incubating in JDK 26. Never claim this is "standard".
 - **Withdrawn / pulled:** String Templates — do not mention as a current feature.
 
 **If asked "is structured concurrency available in 25?"** — the correct senior answer is: *"The API is available as a preview feature and the JDK 25 version uses the current `StructuredTaskScope.open(Joiner...)` shape, but it's not yet final — still requires `--enable-preview`. The closely-related Scoped Values API did finalize in 25. I wouldn't ship structured concurrency to production until it finalizes, which is expected in 26."*
@@ -183,10 +183,10 @@ Not on JDK 24+. JEP 491 eliminated monitor-based pinning — `synchronized` no l
 `ScopedValue` (JEP 506, final in 25) is immutable and dynamically scoped — you set it via `ScopedValue.where(k, v).run(...)` and it's unbound when the scope exits. `ThreadLocal` is mutable, per-thread, and leaks on pooled threads if you forget `remove()`. With millions of virtual threads, `ThreadLocal` also costs more memory. Use scoped values for request context, security principals, tracing IDs.
 
 **Q8. Is structured concurrency production-ready in JDK 25?**
-No. It's the 5th preview (JEP 505). Requires `--enable-preview`. The API shape has changed between 21 and 25 (constructor-style → factory-style with `Joiner` policies). Expected to finalize in JDK 26. Scoped values — which it pairs with — did finalize in 25.
+No. It's the 5th preview (JEP 505). Requires `--enable-preview`. The API shape has changed between 21 and 25 (constructor-style → factory-style with `Joiner` policies). As of JDK 26 (GA March 2026), structured concurrency is still preview (JEP 525, 6th preview). Finalization is targeted for a later release. Scoped values — which it pairs with — did finalize in 25.
 
 **Q9. What's the difference between G1 and ZGC?**
-G1 is region-based, partially concurrent, targets sub-second pauses, and is a reasonable general-purpose default. ZGC targets sub-millisecond pauses even on multi-TB heaps using colored pointers and load barriers. Since JDK 23, generational ZGC is the default mode; non-generational mode was removed in 24. Use G1 unless you have a latency SLA that G1 can't hit.
+G1 is region-based, partially concurrent, targets sub-second pauses, and is a reasonable general-purpose default. ZGC targets sub-millisecond pauses even on multi-TB heaps using colored pointers and load barriers. Generational ZGC is the default mode in 23 (JEP 474); non-generational mode was deprecated for removal in JDK 24 (JEP 458); removed in JDK 25 (JEP 490). Use G1 unless you have a latency SLA that G1 can't hit.
 
 **Q10. What happened to biased locking, and why?**
 Disabled by default in 15 (JEP 374), removed shortly after. It was an optimization for uncontended `synchronized` in single-threaded workloads, but on modern CPUs with cheap atomic ops it rarely helped, while it complicated the safepoint and deoptimization machinery. A simpler VM won.
@@ -195,7 +195,7 @@ Disabled by default in 15 (JEP 374), removed shortly after. It was an optimizati
 Deprecated for removal in 17, permanently disabled in 24 (JEP 486). No direct replacement — the JVM is no longer trying to be a sandbox. Migrate to OS-/container-level isolation (seccomp, user namespaces, read-only filesystems) and capability-based code review.
 
 **Q12. What does compact object headers buy you?**
-JEP 519 (final in 25). Header shrinks from 96–128 bits to 64 bits on 64-bit hardware — the class pointer is packed into the mark word. Typical ~10–22 % heap savings on object-heavy workloads, fewer GC cycles, better cache density. Enable with `-XX:+UseCompactObjectHeaders`.
+JEP 519 (final in 25). Header shrinks from 96 or 128 bits (two discrete sizes depending on compressed-oops config) to 64 bits on 64-bit hardware — the class pointer is packed into the mark word. Typical ~10–22 % heap savings on object-heavy workloads, fewer GC cycles, better cache density. Enable with `-XX:+UseCompactObjectHeaders`.
 
 **Q13. What does pattern matching for `switch` actually let you stop writing?**
 The visitor pattern and long `if-else instanceof` ladders. Combined with sealed types and record patterns, you get exhaustive, type-safe, destructuring dispatch in pure data code — no boilerplate visitor interface, no `default` branch, no casts.
@@ -217,7 +217,7 @@ Module-system fallout from removed Java EE / CORBA packages (8 → 11) — expec
 Virtual threads — the core win. You can drop a reactive stack (or at least stop introducing one) and write synchronous, debuggable code that handles thousands of concurrent blocking calls. Pattern matching for `switch` + record patterns let you retire visitor hierarchies. Sequenced collections give `getFirst`/`getLast`/`reversed` across `List`, `Deque`, `LinkedHashMap`. Generational ZGC is default-available. Caveat: audit for `synchronized` pinning — on 21, `synchronized` still pins a VT to its carrier. (JEP 491 fix lands in 24, not 21.)
 
 **M3. You're moving 21 → 25. Is it worth the quarterly change-management ticket?**
-Usually yes, for these wins: scoped values finalize (drop `ThreadLocal` for request context), compact object headers (~10–22 % heap save, just a flag), AOT class loading and method profiling (meaningful startup/warmup gains — matters for serverless / CLIs / tests), JEP 491 landed in 24 so `synchronized` no longer pins VTs, Class-File API & FFM are now stable so library churn is done. Language gains (module imports, compact source files, flexible ctors) are minor for business code. Structured concurrency is **still preview** in 25 — plan on 26 for that.
+Usually yes, for these wins: scoped values finalize (drop `ThreadLocal` for request context), compact object headers (~10–22 % heap save, just a flag), AOT class loading and method profiling (meaningful startup/warmup gains — matters for serverless / CLIs / tests), JEP 491 landed in 24 so monitor-based pinning on `synchronized` blocks is eliminated (native/JNI frames, FFM downcalls, and class initializer blocking can still pin), Class-File API & FFM are now stable so library churn is done. Language gains (module imports, compact source files, flexible ctors) are minor for business code. As of JDK 26 (GA March 2026), structured concurrency is still preview (JEP 525, 6th preview); finalization is targeted for a later release.
 
 **M4. You maintain a library that supports JDK 8 baseline customers. What's your policy for adopting new features?**
 Stay on JDK 8 source for published artifacts, or ship a multi-release JAR (`META-INF/versions/N/...`) for selective optimizations (e.g., Eclipse Collections, Jackson). Build and test on 8, 11, 17, 21, 25. Use CI matrix; mark preview-dependent modules as optional add-ons. Don't leak `record`/`sealed`/`Stream.toList()` into public API if your published baseline is 8/11. Pick a public deprecation window (e.g., "JDK 11 baseline dropped in v5.0") and announce it one major version ahead.
