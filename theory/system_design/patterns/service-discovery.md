@@ -10,7 +10,7 @@ The client queries a service registry to get available instances, then load-bala
 - **Flow**: Client → Registry (get instances) → Client picks one → Direct call to instance
 - **Pros**: Client can implement smart LB (least connections, latency-based)
 - **Cons**: Coupling — every client must implement discovery logic
-- **Examples**: Netflix Eureka + Ribbon, Consul + custom client
+- **Examples**: Netflix Eureka + Ribbon, Consul + custom client. Note: Netflix Ribbon has been in maintenance since ~2018; Spring Cloud LoadBalancer replaced it (Spring Cloud 2020+).
 
 ### Server-Side Discovery
 The client calls a load balancer/router, which queries the registry and routes the request.
@@ -24,6 +24,7 @@ Services register DNS records. Clients resolve the service name to an IP.
 - **Pros**: Universal, works with any language/framework
 - **Cons**: DNS TTL caching causes staleness; limited to IP:port (no metadata)
 - **Examples**: Consul DNS, Kubernetes CoreDNS, AWS Cloud Map
+- **SRV records**: DNS-based discovery uses **SRV records** (`_service._proto.name → priority weight port target`). Kubernetes headless Services publish SRV records for Pod endpoints; Consul publishes them for registered services.
 
 ### Service Mesh
 Sidecar proxies handle discovery, routing, retries, and mTLS transparently. Application code is unaware.

@@ -110,7 +110,8 @@ Used to iterate all k-subsets of `{0,...,n-1}` in increasing bitmask order.
 int gospersNext(int x) {
     int c = x & -x;         // lowest set bit
     int r = x + c;           // bump the low block
-    return (((r ^ x) >> 2) / c) | r;
+    // unsigned shift to avoid sign issues near top of int range
+    return (((r ^ x) >>> 2) / c) | r;
 }
 
 // Iterate all k-subsets of [0, n)

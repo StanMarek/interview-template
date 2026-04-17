@@ -9,7 +9,7 @@ Replication is the foundation of high availability. Without replication, a singl
 ## Replication Topologies
 
 ### Single-Leader (Primary-Replica)
-One leader accepts all writes. Replicas copy the leader's write-ahead log (WAL) and serve reads.
+One leader accepts all writes. Replicas copy the leader's replication log — **WAL** (PostgreSQL, Oracle redo), **binlog** (MySQL — row/statement/mixed format), **oplog** (MongoDB — idempotent operations). Terminology varies by engine. Replicas serve reads.
 
 ```
 Writes → [Leader] → replication → [Replica 1] ← Reads
@@ -28,6 +28,9 @@ Multiple nodes accept writes. Each replicates to the others.
 - **Conflict resolution**: Last-write-wins (LWW), merge function, CRDTs, manual resolution
 - **Use cases**: Multi-datacenter writes, collaborative editing (Google Docs)
 
+### Chain Replication
+**Chain Replication** (van Renesse/Schneider 2004): linear chain of nodes; writes flow head→tail (ack from tail), reads from tail for strongly consistent results. Higher latency per write but simpler failure handling. Used by some storage systems (FAWN, HyperDex).
+
 ### Leaderless (Dynamo-style)
 No single leader. Any node can accept reads and writes. Uses quorum-based consistency.
 
@@ -35,6 +38,10 @@ No single leader. Any node can accept reads and writes. Uses quorum-based consis
 - Example: N=3, W=2, R=2 — every read sees at least one up-to-date node
 - **Pros**: No failover needed, write to any node
 - **Cons**: Complex conflict resolution, read repair, anti-entropy needed
+
+## Logical vs Physical Replication
+- **Physical** — byte-level/block-level WAL shipping (PG streaming replication). Same engine version typically required.
+- **Logical** — row-level changes with semantics (PG logical replication slots, MySQL binlog in ROW format, Debezium CDC). Cross-version, selective, filter-able.
 
 ## Synchronous vs Asynchronous Replication
 
@@ -88,7 +95,7 @@ When the leader fails, a replica must be promoted. This is one of the hardest op
 | DynamoDB | Leaderless (internally), multi-region with Global Tables | Managed by AWS |
 | CockroachDB | Multi-active, Raft consensus per range | Strong consistency, automatic rebalancing |
 | Spanner / YugabyteDB / TiDB | Multi-Raft / Paxos per shard | Globally-distributed strong consistency via TrueTime or HLC |
-| Aurora | Storage-level replication (6-way) | Leader + 5 replicas share distributed storage; instant failover |
+| Aurora | Storage-level replication (6-way across 3 AZs) | Replicates at the storage service level; up to **15 read replicas** share the same distributed storage (not replicas of the 6 copies); instant failover |
 
 ## Possible Interview Questions
 1. "How would you ensure zero data loss during a leader failure?"

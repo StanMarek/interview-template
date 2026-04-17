@@ -2,7 +2,7 @@
 
 ## Overview
 
-Arrays are the most fundamental data structure — a contiguous block of memory storing elements of the same type. Strings in Java are immutable character arrays backed by `char[]` (or `byte[]` since Java 9). Nearly every coding interview will involve at least one array or string problem.
+Arrays are the most fundamental data structure — a contiguous block of memory storing elements of the same type. Strings in Java are immutable character arrays backed by `byte[]` (since Java 9, JEP 254 Compact Strings); a coder flag marks LATIN1 vs UTF-16 content. Nearly every coding interview will involve at least one array or string problem.
 
 ## Core Concepts
 
@@ -74,17 +74,17 @@ List<Integer> mutable = new ArrayList<>(List.of(1, 2, 3));
 
 ### Time Complexity
 
-| Operation         | Array     | ArrayList | String        | StringBuilder |
-|--------------------|-----------|-----------|---------------|---------------|
-| Access by index    | O(1)      | O(1)      | O(1)          | O(1)          |
-| Search (unsorted)  | O(n)      | O(n)      | O(n)          | O(n)          |
-| Search (sorted)    | O(log n)  | O(log n)  | —             | —             |
-| Insert at end      | O(1)*     | O(1)*     | O(n) (new)    | O(1)*         |
-| Insert at middle   | O(n)      | O(n)      | O(n)          | O(n)          |
-| Delete             | O(n)      | O(n)      | O(n)          | O(n)          |
-| Concatenation      | —         | —         | O(n+m)        | O(m)          |
+| Operation                           | Array     | ArrayList | String        | StringBuilder |
+|-------------------------------------|-----------|-----------|---------------|---------------|
+| Access by index                     | O(1)      | O(1)      | O(1)          | O(1)          |
+| Search (unsorted)                   | O(n)      | O(n)      | O(n)          | O(n)          |
+| Search (sorted)                     | O(log n)  | O(log n)  | —             | —             |
+| Insert at end (ArrayList, not raw)  | O(1)*     | O(1)*     | O(n) (new)    | O(1)*         |
+| Insert at middle                    | O(n)      | O(n)      | O(n)          | O(n)          |
+| Delete                              | O(n)      | O(n)      | O(n)          | O(n)          |
+| Concatenation                       | —         | —         | O(n+m)        | O(m)          |
 
-*Amortized — may trigger resize/copy.
+*Amortized — may trigger resize/copy. Raw Java arrays are fixed-length; amortized O(1) append only applies to `ArrayList`/`ArrayDeque`.
 
 ## Essential Techniques and Patterns
 
@@ -293,7 +293,7 @@ private int expand(String s, int l, int r) {
 ## Tips and Pitfalls
 
 - **Off-by-one errors:** Always double-check loop bounds, especially `<` vs `<=` and inclusive vs exclusive indices.
-- **Integer overflow:** Use `long` for sums or products, or `(lo + hi) >>> 1` for midpoint to avoid overflow.
+- **Integer overflow:** Use `long` for sums or products, or `(lo + hi) >>> 1` for midpoint to avoid overflow. Note: the idiomatic overflow-safe form per Bloch/Sedgewick is `lo + (hi - lo) / 2`; both work, but the latter is more widely recognized.
 - **String immutability:** Never concatenate strings in a loop — use `StringBuilder`. Each `+=` creates a new object → O(n²).
 - **Empty/null checks:** Always handle `null`, empty arrays, and single-element edge cases first.
 - **Sorting as preprocessing:** Many problems become simpler after sorting. Ask yourself: "Would sorting help here?"

@@ -47,12 +47,12 @@
 | HashMap | — | O(1)* | O(1)* | O(1)* | O(n) |
 | TreeMap | — | O(log n) | O(log n) | O(log n) | O(n) |
 | LinkedList | O(n) | O(n) | O(1)† | O(1)† | O(n) |
-| Stack/Queue | O(n) | O(n) | O(1)* | O(1) | O(n) |
+| Stack/Queue | N/A‡ | N/A‡ | O(1)* | O(1) | O(n) |
 | Heap | — | O(n) | O(log n) | O(log n) | O(n) |
 | BST (balanced) | — | O(log n) | O(log n) | O(log n) | O(n) |
 | Trie | — | O(m) | O(m) | O(m) | O(N·M) |
 
-*Amortized. †At head/tail with pointer.
+*Amortized. †At head/tail with pointer. ‡Not part of the ADT contract; random access requires a different data structure.
 
 ## Java Collections Quick Reference
 

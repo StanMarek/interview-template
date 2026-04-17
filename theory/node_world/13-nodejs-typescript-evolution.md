@@ -4,7 +4,7 @@
 
 ## 1. Node.js Version History (Key Features)
 
-Node.js ships a new major version every April. Even-numbered releases become LTS in October (18 months active + 12 months maintenance). Odd-numbered releases never reach LTS.
+Node.js ships a new major version every April. Even-numbered releases become LTS in October: **12 months Active LTS** + **18 months Maintenance** (30 months total). Odd-numbered releases never reach LTS.
 
 | Version | Release  | V8     | npm  | Key Theme                        |
 |---------|----------|--------|------|----------------------------------|
@@ -43,7 +43,7 @@ Stable test runner with coverage (`--experimental-test-coverage`). Experimental 
 
 ### Node 22 — require(ESM), WebSocket, Glob, Type Stripping
 
-The most requested feature: `require()` for ES modules (experimental), enabling gradual ESM adoption. Built-in WebSocket client (Undici-based). `glob`/`globSync` in `node:fs`. Maglev compiler in V8 12.4. TypeScript type stripping (`--experimental-strip-types`) for direct `.ts` execution.
+The most requested feature: `require()` for ES modules. Previewed in Node 22.0 behind `--experimental-require-module`; unflagged in Node 22.12 (Dec 2024) and default in Node 23+ — enabling gradual ESM adoption. Built-in WebSocket client (Undici-based). `glob`/`globSync` in `node:fs`. Maglev compiler in V8 12.4. TypeScript type stripping (`--experimental-strip-types`) for direct `.ts` execution.
 
 ### Node 24 — What Is Coming
 
@@ -164,6 +164,8 @@ getOrDefault('hello', 42); // Error: number not assignable to string
 
 ### TS 5.5 — Inferred Type Predicates, isolatedDeclarations
 
+Headline set: **Map.groupBy / Object.groupBy type support; inferred type predicates; `--isolatedDeclarations`.**
+
 Filter now narrows types automatically:
 
 ```typescript
@@ -240,7 +242,7 @@ const pkg = require('./package.json'); // JSON import from ESM
 
 ### Comparison Table
 
-| Feature                    | npm 10         | Yarn Berry     | pnpm 9         |
+| Feature                    | npm 10         | Yarn Berry     | pnpm 10        |
 |---------------------------|----------------|----------------|----------------|
 | Lock file                 | `package-lock.json` | `yarn.lock` | `pnpm-lock.yaml` |
 | Cold install speed        | Moderate       | Fast (PnP)     | Fast           |
@@ -261,7 +263,7 @@ Complete rewrite with Plug'n'Play (PnP): eliminates `node_modules`, maps imports
 
 ### pnpm
 
-Content-addressable store with hard links. Each package version stored once globally; projects link to it. **Strict by default**: undeclared dependencies fail at runtime (no phantom deps). Fastest for cold installs. Monorepo via `pnpm-workspace.yaml`.
+Content-addressable store with hard links. Each package version stored once globally; projects link to it. **Strict by default**: undeclared dependencies fail at runtime (no phantom deps). Fastest for cold installs. Monorepo via `pnpm-workspace.yaml`. **pnpm 10 (Jan 2025)** disables lifecycle scripts by default for security — `postinstall`/`preinstall` from transitive deps must be explicitly allow-listed via `onlyBuiltDependencies` / `pnpm approve-builds`.
 
 ### Corepack
 

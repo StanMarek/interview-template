@@ -40,7 +40,7 @@ If the coordinator crashes **after** some cohorts voted COMMIT but **before** se
 Recovery requires either: (a) coordinator to recover and consult its log, or (b) manual operator intervention.
 
 ### 2. Single Point of Failure
-The coordinator is critical. High availability requires replicating the coordinator's log (usually via Paxos/Raft), which effectively turns 2PC into 3PC or consensus-based protocols.
+The coordinator is critical. High availability requires replicating the coordinator's log (usually via Paxos/Raft). Replicating the coordinator's log via Raft creates a **highly available 2PC** (coordinator is no longer a SPOF) — but it's still 2PC, not 3PC. **3PC** adds a distinct third phase (PreCommit) to avoid blocking on coordinator failure, which 2PC suffers from.
 
 ### 3. Performance
 - Every transaction = 2 round trips + fsync on each cohort. Latency adds up across services and geographies.
@@ -56,7 +56,7 @@ Adds a **PreCommit** phase between Prepare and Commit, letting cohorts time out 
 - **XA Transactions** (JTA in Java): `XADataSource`, `XAResource`. Used in monolithic Java EE apps with multiple DBs + JMS brokers.
 - **PostgreSQL Prepared Transactions** (`PREPARE TRANSACTION`): Explicit 2PC support for external coordinators.
 - **MSDTC** (Windows Distributed Transaction Coordinator): Common in .NET enterprise apps.
-- **Kafka Transactions**: Internally use a 2PC-like protocol coordinated by the transaction coordinator on brokers.
+- **Kafka Transactions**: Use a **transaction coordinator + control records (commit/abort markers)**. The protocol is 2PC-like conceptually but not strict 2PC: coordinator + topic-partition brokers act as participants, control markers replace explicit prepare/commit messages.
 - **Distributed databases** (Spanner, CockroachDB, TiDB, FoundationDB): Use 2PC internally for cross-shard transactions, but combined with Paxos/Raft for fault-tolerance of the coordinator role (so the coordinator itself never single-points-of-fails).
 
 ## 2PC vs Saga vs Outbox

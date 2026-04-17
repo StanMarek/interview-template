@@ -67,6 +67,9 @@ CDNs aren't just for static files:
 - **HTTP/3 over QUIC**: All major CDNs (Cloudflare, Akamai, Fastly, CloudFront) enable HTTP/3 by default. 0-RTT resumption and no head-of-line blocking drastically improve mobile/lossy-network performance.
 - **Dynamic site acceleration (DSA)**: Optimized routing between edge and origin (better than public internet).
 
+## Signed URLs / Signed Cookies
+**Signed URLs / Signed Cookies** — time-limited access to private CDN content. CloudFront uses RSA-signed URLs with expiry; Cloudflare uses HMAC. Essential for paid content, user uploads, or per-user access control.
+
 ## Security Features
 - **DDoS protection**: Edge network absorbs volumetric attacks
 - **WAF (Web Application Firewall)**: Filter malicious requests at the edge

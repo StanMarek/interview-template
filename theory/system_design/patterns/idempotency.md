@@ -66,6 +66,9 @@ CREATE TABLE idempotency_keys (
 - The entire operation (check key + execute + store result) should be atomic (within a transaction)
 - Store the response so retries get the same result without re-executing
 
+## The Exactly-Once Myth
+True exactly-once DELIVERY is impossible across network boundaries (Two Generals Problem). Kafka's "Exactly-Once Semantics" (EOS) only guarantees exactly-once **processing** within a consume→process→produce pipeline bounded to Kafka. External side effects require idempotent sinks or app-level dedup. Practical approach: at-least-once delivery + idempotency key for dedup at the receiver.
+
 ## Idempotency in Message Queues
 At-least-once delivery means consumers may process the same message multiple times. Solutions:
 - **Message ID deduplication**: Track processed message IDs

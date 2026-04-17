@@ -214,7 +214,7 @@ export class CacheModule {
 
 ### How DI Works Under the Hood
 
-NestJS uses **reflection metadata** (`reflect-metadata` + TypeScript `emitDecoratorMetadata`) to build a dependency graph at startup:
+NestJS uses **reflection metadata** (`reflect-metadata` + TypeScript `emitDecoratorMetadata`) to build a dependency graph at startup. Requires BOTH `experimentalDecorators: true` AND `emitDecoratorMetadata: true` in tsconfig. NestJS 10/11 still uses legacy decorators — stage-3 decorator support is being tracked but not yet default.
 
 1. TypeScript compiler emits type metadata via `Reflect.defineMetadata('design:paramtypes', ...)`
 2. `@Injectable()` marks classes as DI-managed providers
@@ -456,12 +456,14 @@ async findOrder(@Payload() data: { id: string }): Promise<Order> {
 
 | Metric | Express | Fastify |
 |--------|---------|---------|
-| Requests/sec (hello world) | ~15,000 | ~77,000 |
+| Requests/sec (hello world) | baseline | 2-3× faster |
 | JSON serialization | `JSON.stringify` at runtime | Compiled via `fast-json-stringify` |
 | Routing | Linear regex matching | Radix tree (`find-my-way`) |
 | Validation | External (Joi/Yup) | Built-in JSON Schema (ajv) |
 | Plugin system | None (middleware) | Encapsulated plugin tree |
 | Ecosystem | Massive (10+ years) | Growing rapidly |
+
+**Benchmark caveat**: Fastify typically outperforms Express by 2-3× on trivial benchmarks; exact numbers vary by workload and Node version. Consult Fastify's own benchmarks for current figures.
 
 **Why Fastify is faster**: Schemas are compiled at startup into optimized serialization functions that skip key enumeration and type checking at runtime.
 
@@ -498,6 +500,8 @@ await app.listen(3000, '0.0.0.0');
 ```
 
 **Caveats**: Express middleware (passport, multer) needs Fastify equivalents; `@Res()` API differs; some NestJS community packages assume Express.
+
+**NestJS 11**: NestJS 11 (released 2025) adds Fastify 5 support and requires Node 20+.
 
 ---
 

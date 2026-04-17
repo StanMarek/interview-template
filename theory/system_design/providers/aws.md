@@ -7,13 +7,13 @@
 | Containers (managed) | **ECS** (Elastic Container Service) | AWS-native container orchestration |
 | Kubernetes (managed) | **EKS** (Elastic Kubernetes Service) | Managed K8s control plane |
 | Serverless containers | **Fargate** | No server/cluster management for ECS/EKS |
-| Serverless functions | **Lambda** | Event-driven, pay-per-invocation, 15 min max |
+| Serverless functions | **Lambda** | Event-driven, pay-per-invocation, 15 min max. **Lambda SnapStart** — GA for Java 17/21 since 2022. **GA for Python and .NET (Nov 2024)**. GA for Node.js 22 (2025). Reduces cold start from seconds to ~100ms for supported runtimes. |
 | Batch processing | **AWS Batch** | Managed batch computing jobs |
 
 ## Storage
 | Concept | AWS Service | Notes |
 |---------|------------|-------|
-| Object storage | **S3** (Simple Storage Service) | 11 nines durability; Standard, IA, Glacier tiers |
+| Object storage | **S3** (Simple Storage Service) | 11 nines durability; Standard, IA, Glacier tiers. Strong read-after-write consistency since Dec 2020 (all operations, all regions). |
 | Block storage | **EBS** (Elastic Block Store) | Attached to EC2, SSD/HDD options |
 | File storage (NFS) | **EFS** (Elastic File System) | Shared filesystem for multiple EC2 instances |
 | Archival storage | **S3 Glacier / Glacier Deep Archive** | Minutes to hours retrieval |
@@ -24,7 +24,7 @@
 | Managed SQL (MySQL/PostgreSQL) | **RDS** | Multi-AZ, read replicas, automated backups |
 | Cloud-native SQL | **Aurora** | MySQL/PostgreSQL compatible, 5x throughput, storage auto-scales |
 | Serverless distributed SQL (multi-region) | **Aurora DSQL** (GA 2025) | Active-active multi-region, strongly consistent, PostgreSQL-compatible. AWS's answer to Cloud Spanner. |
-| Managed NoSQL (key-value/document) | **DynamoDB** | Single-digit ms latency, auto-scaling, global tables |
+| Managed NoSQL (key-value/document) | **DynamoDB** | Single-digit ms latency, auto-scaling, global tables. **DynamoDB on-demand pricing reduced 50%** (Nov 2024); **Global Tables reduced 67%**. Reserved capacity pricing unchanged. |
 | Managed Redis/Memcached/Valkey | **ElastiCache** | Redis OSS, Valkey, or Memcached clusters (Valkey added 2024) |
 | Managed Elasticsearch | **OpenSearch Service** | Fork of Elasticsearch, includes serverless option and vector search |
 | Graph database | **Neptune** | Property graph + RDF; Neptune Analytics for graph analytics |
@@ -41,7 +41,7 @@
 | DNS | **Route 53** | DNS + health checks + traffic routing (geo, latency, weighted, failover) |
 | CDN | **CloudFront** | Global CDN, Lambda@Edge for edge compute |
 | L4 Load Balancer | **NLB** (Network Load Balancer) | Millions of requests/sec, ultra-low latency |
-| L7 Load Balancer | **ALB** (Application Load Balancer) | HTTP/HTTPS routing, path/host-based, WebSocket |
+| L7 Load Balancer | **ALB** (Application Load Balancer) | HTTP/HTTPS routing, path/host-based, WebSocket. **ALB + AWS WAF** integration — managed rule groups for OWASP Top 10, bot control, rate limiting. Apply at ALB, CloudFront, or API Gateway. |
 | Classic Load Balancer | **CLB** | Legacy, avoid for new designs |
 | API Gateway | **API Gateway** | REST, HTTP, WebSocket APIs; throttling, auth, caching |
 | Service mesh | **App Mesh** | Envoy-based service mesh |
@@ -50,10 +50,10 @@
 ## Messaging & Streaming
 | Concept | AWS Service | Notes |
 |---------|------------|-------|
-| Message queue | **SQS** (Simple Queue Service) | Standard (at-least-once, best-effort ordering) or FIFO (exactly-once, strict ordering) |
+| Message queue | **SQS** (Simple Queue Service) | Standard (at-least-once, best-effort ordering) or FIFO (**exactly-once processing** within a 5-minute deduplication window — not delivery; strict ordering per message group) |
 | Pub/Sub | **SNS** (Simple Notification Service) | Fan-out to SQS, Lambda, HTTP, email, SMS |
 | Event streaming (Kafka) | **MSK** (Managed Streaming for Apache Kafka) | Fully managed Kafka |
-| Serverless event streaming | **Kinesis Data Streams** | Real-time streaming, 1-365 day retention |
+| Serverless event streaming | **Kinesis Data Streams** | Real-time streaming. Retention: 24h default; extended up to 7 days (standard pricing); long-term up to 365 days (tiered pricing — reads from long-term tier charged separately). |
 | Event bus | **EventBridge** | Serverless event bus, rule-based routing |
 | Workflow orchestration | **Step Functions** | State machine for coordinating Lambda/services |
 

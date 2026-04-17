@@ -92,8 +92,8 @@ int rabinKarp(String t, String p) {
     for (int i = 0; i <= n - m; i++) {
         if (tHash == pHash && t.regionMatches(i, p, 0, m)) return i;  // verify!
         if (i < n - m) {
-            tHash = ((tHash - t.charAt(i) * power % MOD + MOD * MOD) * BASE
-                    + t.charAt(i + m)) % MOD;
+            long sub = (tHash - t.charAt(i) * power % MOD + MOD) % MOD;
+            tHash = (sub * BASE + t.charAt(i + m)) % MOD;
         }
     }
     return -1;

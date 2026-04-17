@@ -20,7 +20,11 @@ For `N` replicas, a **majority quorum** is `floor(N/2) + 1`:
 Why odd numbers? `N=4` also only tolerates 1 failure (quorum = 3), so you pay for an extra replica with no extra fault tolerance. Always deploy consensus clusters with an odd number of nodes (3, 5, 7).
 
 ### Read/Write Quorums (Dynamo-style)
-Tunable-consistency systems (Cassandra, DynamoDB) use separate `R` and `W` quorums. If `R + W > N`, reads and writes overlap on at least one node, giving strong consistency. Common configs:
+Tunable-consistency systems (Cassandra, DynamoDB) use separate `R` and `W` quorums. If `R + W > N`, reads and writes overlap on at least one node, giving strong consistency.
+
+> This gives overlapping quorums ("strong consistency" in the Dynamo sense) — not full linearizability without additional mechanisms (synchronous writes to all W nodes before ack, no sloppy quorums, read repair).
+
+Common configs:
 - `N=3, W=2, R=2` → strong, survives 1 node failure
 - `N=3, W=3, R=1` → fast reads, writes fail if any node is down
 - `N=3, W=1, R=1` → very fast, eventually consistent only
@@ -86,7 +90,7 @@ Rule of thumb: consensus gives you **correctness at the cost of latency and scal
 | etcd      | Raft                 | Kubernetes control plane, service discovery    |
 | Consul    | Raft                 | Service discovery, KV, distributed locks       |
 | ZooKeeper | ZAB                  | HBase/Kafka (pre-KRaft) coordination           |
-| Kafka     | KRaft (Raft variant) | Controller metadata since 4.0                  |
+| Kafka     | KRaft (Raft variant) | KRaft went GA in Kafka 3.3 (Oct 2022), became the default in 3.5, and ZooKeeper was fully removed in Kafka 4.0 (March 2025). |
 | Spanner   | Paxos (per shard)    | Globally consistent SQL                        |
 | CockroachDB / TiKV | Raft        | Per-range replication                          |
 | Chubby    | Paxos                | Google's internal lock service                 |

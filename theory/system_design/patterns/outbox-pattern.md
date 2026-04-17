@@ -76,7 +76,7 @@ Debezium reads the database's write-ahead log (PostgreSQL logical replication, M
 - **Cons**: Operational complexity (Kafka Connect, replication slots, schema registry), WAL retention tuning, lag monitoring.
 - **Use when**: High scale, latency-sensitive, existing Kafka Connect infrastructure.
 
-Debezium supports an **Outbox Event Router** SMT that extracts the event payload and routes by `event_type`, making the pattern first-class.
+Debezium supports an **Outbox Event Router** SMT that extracts the event payload and routes by `aggregatetype` (the Debezium Outbox Event Router default column name), making the pattern first-class. Note: the column name is configurable via `route.by.field`.
 
 ## Guarantees
 
@@ -89,7 +89,7 @@ Debezium supports an **Outbox Event Router** SMT that extracts the event payload
 
 ## Cleanup
 The outbox table grows forever if unattended. Strategies:
-- **TRUNCATE after publish**: Polling relay deletes rows on successful publish. Simplest.
+- **Delete after publish**: Polling relay deletes rows on successful publish — `DELETE FROM outbox WHERE published_at IS NOT NULL` or `DELETE FROM outbox WHERE id = ?` per-row. Do NOT use `TRUNCATE` — it drops the whole table (including unpublished rows).
 - **TTL/cron**: `DELETE FROM outbox WHERE created_at < NOW() - INTERVAL '7 days'` (keep for replay debugging).
 - **Partitioning**: Daily partitions, drop old partitions.
 

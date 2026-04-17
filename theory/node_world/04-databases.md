@@ -463,7 +463,7 @@ prisma.$use(async (params, next) => {
   return result;
 });
 
-// NOTE: Middleware is deprecated in favor of client extensions (Prisma 4.16+)
+// NOTE: Middleware was **Removed** in Prisma v6.14.0 (Aug 2025). Use Prisma Client Extensions instead. The examples below are historical — they no longer run on current Prisma.
 // Client extensions are more type-safe and composable:
 const xprisma = prisma.$extends({
   query: {
@@ -1118,6 +1118,7 @@ const cluster = new Redis.Cluster([
   redisOptions: { password: process.env.REDIS_PASSWORD },
   scaleReads: 'slave',  // Read from replicas
 });
+// NOTE: Redis 5+ renamed 'slave' → 'replica'. ioredis still accepts 'slave' for backward compat but 'replica' or 'all' is preferred.
 ```
 
 ### Caching Strategies
@@ -2312,7 +2313,7 @@ Sizing rule of thumb: `pgbouncer default_pool_size ≈ 2 * CPU cores on Postgres
 1. Prisma `select` omitted → ships the whole row; `Buffers` on the plan doesn't show it but the wire does.
 2. TypeORM lazy relations (`Promise<Post[]>`) silently issue queries in a `.map(...)` — classic N+1.
 3. Drizzle's `with: { posts: true }` joins; forgetting it and calling a separate query loops.
-4. `prisma.$transaction([...])` (array form) runs **sequentially, not atomically** across independent clients — still one tx, but people assume parallelism.
+4. `prisma.$transaction([...])` (array form): The array form IS atomic — queries run sequentially within a single BEGIN/COMMIT on one connection.
 5. Holding a transaction across `await fetch(...)` → long-running tx blocks autovacuum; table bloats.
 6. Using `name` on `pg.Client.query` through PgBouncer transaction mode without `max_prepared_statements` → random `prepared statement "S_1" does not exist`.
 7. `LISTEN/NOTIFY` through PgBouncer transaction mode → silently drops notifications.

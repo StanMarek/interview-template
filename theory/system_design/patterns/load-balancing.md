@@ -30,6 +30,7 @@ Every system design question that serves more than a trivial number of users req
 | **Consistent Hashing** | Minimize redistribution on server add/remove | Caching layers |
 | **Random** | Pick a random server | Simple, surprisingly effective at scale |
 | **Random Two Choices** | Pick 2 random, choose the less loaded one | Best tradeoff of simplicity and balance ("power of two choices") |
+| **P2C with EWMA** | Pick two random backends, choose lower exponentially-weighted moving average of inflight/latency | Near-optimal load distribution with O(1) bookkeeping (Finagle, Envoy) |
 | **Maglev Hashing** | Google's consistent-hashing variant with fixed-size lookup table | High-throughput L4 LBs (Cilium, Katran, Google Maglev) |
 
 ## Key Concepts
@@ -53,7 +54,7 @@ Distributes traffic across multiple data centers/regions, typically via DNS or A
 Modern LBs (Envoy, Nginx ≥ 1.25, HAProxy ≥ 2.8, AWS CloudFront, Google Cloud LB) now support **HTTP/3 over QUIC** (UDP-based). Benefits: 0-RTT connection resumption, no head-of-line blocking, better performance on lossy mobile networks. Typical deployment: terminate HTTP/3 at the edge, speak HTTP/2 or HTTP/1.1 to origins. Global adoption crossed ~35% by late 2025.
 
 ### eBPF / XDP-Based Load Balancing
-Kernel-level LBs using eBPF (Cilium, Katran, Facebook's Katran, Cloudflare Unimog) process packets in the Linux kernel before they reach userspace. Massively higher throughput (millions of PPS) with very low latency. **Cilium** replaces `kube-proxy` in Kubernetes and supports Maglev consistent hashing + DSR (Direct Server Return) out of the box.
+Kernel-level LBs using eBPF (Cilium, Facebook's Katran, Cloudflare Unimog) process packets in the Linux kernel before they reach userspace. Massively higher throughput (millions of PPS) with very low latency. **Cilium** replaces `kube-proxy` in Kubernetes and supports Maglev consistent hashing + DSR (Direct Server Return) out of the box.
 
 ## Common Architectures
 

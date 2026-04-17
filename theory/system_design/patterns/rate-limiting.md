@@ -40,7 +40,7 @@ Combines fixed window and sliding window. Estimate the current window count usin
 
 - **Pros**: Good accuracy, low memory
 - **Cons**: Approximate, not exact
-- **Formula**: `count = prev_window_count × overlap% + current_window_count`
+- **Formula**: `rate = current_window_count + prev_window_count × overlap_fraction`, where `overlap_fraction` is the fraction of the PREVIOUS fixed window still within the sliding range from current time.
 
 ## Rate Limiting Dimensions
 
@@ -64,6 +64,11 @@ A single-server rate limiter is simple, but in a distributed system with multipl
 
 ### Redis Race Condition
 Two servers read count=99 simultaneously (limit=100), both allow, actual count = 101. Solution: Use Redis Lua scripts for atomic check-and-increment, or use `INCR` which is atomic.
+
+### INCR + EXPIRE Atomicity Bug
+Naive `INCR` + separate `EXPIRE` has a race window where INCR succeeds but EXPIRE fails — creating a key without TTL that accumulates counts forever. Fix with one of:
+- **Lua script** (atomic): `local c = redis.call('INCR', KEYS[1]); if c == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end; return c`
+- **Pipeline**: `SET key 0 EX ttl NX` then `INCR` — the `SET ... NX` creates the key with TTL only if absent, then `INCR` bumps it.
 
 ## Response Handling
 

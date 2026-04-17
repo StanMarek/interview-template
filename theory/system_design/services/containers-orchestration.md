@@ -23,7 +23,7 @@ Lightweight, isolated environments that package an application with its dependen
 ## Container Orchestration (Kubernetes)
 
 ### What It Is
-Kubernetes (K8s) automates deployment, scaling, and management of containerized applications across a cluster of machines. Current stable releases: **1.32 "Penelope" (Dec 2024)**, **1.33 "Octarine" (Apr 2025)**, **1.34 (Aug 2025)** — Kubernetes now releases three minor versions per year with roughly one year of patch support per version.
+Kubernetes (K8s) automates deployment, scaling, and management of containerized applications across a cluster of machines. Current stable releases: **1.32 "Penelope" (Dec 2024)**, **1.33 "Octarine" (Apr 2025)**, **1.34 (Aug 2025)** — Kubernetes now releases three minor versions per year. Each Kubernetes minor version receives ~14 months of patch support (12 months standard + 2-month grace).
 
 ### Notable Recent Changes
 - **Dockershim removed in 1.24** — you must use a CRI runtime (containerd, CRI-O). "Docker in K8s" now means containerd under the hood.
@@ -51,7 +51,7 @@ Kubernetes (K8s) automates deployment, scaling, and management of containerized 
 
 ### Kubernetes Architecture
 - **Control plane**: API Server (entry point), etcd (state store, v3.5/3.6), Scheduler (pod placement), Controller Manager (desired state reconciliation)
-- **Worker nodes**: kubelet (node agent), kube-proxy (or eBPF-based replacement like Cilium), container runtime (containerd / CRI-O — **NOT Docker directly since 1.24**)
+- **Worker nodes**: kubelet (node agent), `kube-proxy` (manages Service → Pod traffic via iptables/IPVS/userspace; eBPF-based CNIs like **Cilium** can replace kube-proxy entirely (`kube-proxy-free` mode) and add L3-L7 policy + observability), container runtime (containerd / CRI-O — **NOT Docker directly since 1.24**)
 
 ### Deployment Strategies
 | Strategy | How It Works | Risk |

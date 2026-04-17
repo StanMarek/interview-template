@@ -1362,6 +1362,18 @@ type DeepPartialBounded<T, Depth extends number[] = []> =
 //   adding complexity to make the type system happy
 ```
 
+### `isolatedDeclarations` (TS 5.5+)
+
+TS 5.5+ supports `--isolatedDeclarations` for parallel declaration-only emits in monorepos; requires explicit return types on exports. This lets external tools (e.g., bundlers, build accelerators) generate `.d.ts` files in parallel without running the full type checker, dramatically speeding up builds in large workspaces.
+
+### Stage-3 vs Legacy Decorators
+
+TS 5.0+ ships stage-3 decorators by default; `experimentalDecorators: true` is still needed for legacy decorators (required by older versions of NestJS/TypeORM). Runtime semantics differ — legacy decorators use `Reflect.metadata`, stage-3 do not.
+
+### TypeScript Version Baseline
+
+As of 2026, TypeScript 5.7+ is current stable.
+
 ---
 
 ## 8. Common Pitfalls & Anti-patterns

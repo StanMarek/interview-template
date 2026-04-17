@@ -24,11 +24,14 @@ Only keys that were assigned to the removed node need to move to the next node c
 With few physical nodes, the hash ring is unevenly divided → some nodes get disproportionately more keys (**load imbalance**).
 
 ## Virtual Nodes (Vnodes)
-Instead of placing each physical node at one point on the ring, place it at **many points** (virtual nodes). Each physical node gets 100-200 vnodes spread around the ring.
+Instead of placing each physical node at one point on the ring, place it at **many points** (virtual nodes). Each physical node gets many vnodes spread around the ring.
 
+- **Varies widely by system**: Cassandra defaults to 16 (modern), historically 256; Riak used 64; DynamoDB internal. Typical range 32-256. Higher vnode counts improve balance but increase metadata overhead.
 - **Result**: Much more even distribution
 - **Adding a node**: Its vnodes are spread around the ring, so it absorbs a small fraction of keys from many nodes rather than a large chunk from one node
 - **Heterogeneous hardware**: Give more powerful nodes more vnodes
+- **Memory complexity**: O(N × V) where V = vnodes per node.
+- **Lookup complexity**: O(log(N × V)) via sorted-ring binary search.
 
 ## Consistent Hashing vs Rendezvous Hashing
 
@@ -64,6 +67,10 @@ function remove_node(node):
     for i in range(num_vnodes):
         ring.remove(hash(node + ":" + i))
 ```
+
+## Alternatives
+- **Jump Hash** (Lamping/Veach 2014) — O(1) lookup, no state; cannot handle arbitrary removal.
+- **Rendezvous Hashing (HRW)** — O(N) lookup but simpler invariants; used by CDNs.
 
 ## Bounded-Load Consistent Hashing
 Google's refinement: set a max load per node (e.g., 1.25× average). If the target node is at capacity, overflow to the next node on the ring. Ensures no single node gets overloaded even with skewed key access patterns.

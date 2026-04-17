@@ -5,7 +5,7 @@ Distributed search and analytics engines built on Apache Lucene. They create inv
 
 ## The Elasticsearch / OpenSearch Split (INTERVIEW-RELEVANT)
 In 2021, Elastic relicensed Elasticsearch and Kibana from Apache 2.0 to dual SSPL / Elastic License (source-available, not OSS). AWS forked the last Apache-licensed version (7.10) as **OpenSearch**, now governed by the OpenSearch Software Foundation (Linux Foundation, 2024).
-- **Elasticsearch 8.x / 9.x (2025)**: Native vector search (HNSW), ES|QL query language, semantic search via ELSER, dense/sparse vector fields. In Aug 2024 Elastic added AGPLv3 as a third license option, making the OSS status debatable again.
+- **Elasticsearch 8.x / 9.x (2025)**: Native vector search (HNSW), ES|QL query language, semantic search via ELSER, dense/sparse vector fields. Aug 2024 — Elastic added **AGPLv3** alongside ELv2 and SSPL, making Elasticsearch **tri-licensed**. The AGPLv3 option satisfies OSI open-source criteria. Elastic markets this as "Open Source again".
 - **OpenSearch 2.x / 3.0 (2025)**: Apache 2.0, vector engine (k-NN via FAISS/Lucene/NMSLIB), ML Commons plugin, neural search.
 - **API compatibility**: Still largely compatible for basic operations; diverges on vector search, ML features, and newer APIs.
 - AWS OpenSearch Service, and many cloud-managed "Elasticsearch" offerings, actually run OpenSearch.
@@ -44,7 +44,7 @@ An index is split into shards (Lucene indexes). Each shard can be on a different
 4. **Merge**: Background process merges small segments into larger ones (reduces overhead)
 
 ## Key Features
-- **Full-text search**: Tokenization, stemming, synonyms, fuzzy matching, relevance scoring (TF-IDF / BM25)
+- **Full-text search**: Tokenization, stemming, synonyms, fuzzy matching, relevance scoring via **BM25** — default similarity scoring in Lucene 6+ / Elasticsearch 5+ (2016+). TF-IDF is the classical precursor; BM25 normalizes for document length and tunes saturation via k1, b params.
 - **Aggregations**: Equivalent to SQL GROUP BY. Metrics, buckets, pipelines.
 - **Geo search**: Geo-point, geo-shape queries, distance filtering
 - **Autocomplete**: Completion suggester, edge n-gram tokenizer

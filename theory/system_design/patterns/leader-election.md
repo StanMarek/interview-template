@@ -14,6 +14,9 @@ Node with the highest ID becomes leader. If the current leader fails, the highes
 ### Raft-Based Election
 Nodes are in one of three states: follower, candidate, leader. On leader timeout, a follower becomes a candidate and requests votes. Majority wins. Heartbeats maintain leadership.
 
+### Zab (ZooKeeper Atomic Broadcast)
+**Zab** predates Raft. Uses primary-order broadcast with epochs for leader recovery. Conceptually closer to Multi-Paxos than Raft. Used exclusively by ZooKeeper.
+
 ### ZooKeeper / etcd Lease-Based
 Create an ephemeral node (ZooKeeper) or acquire a lease (etcd). The node that successfully creates it is the leader. If the leader dies, the ephemeral node disappears, and others race to create it.
 
@@ -30,8 +33,11 @@ The node that successfully updates the row is the leader. Must renew the lease b
 
 **Solution**: Each leader election issues a monotonically increasing **fencing token** (epoch number). All operations include the token. The storage/resource rejects operations with older tokens. This is the standard safety mechanism in systems like HDFS, GFS, and Kafka (where it's called the **leader epoch**).
 
+## Split-Brain Prevention
+Quorum majority (`floor(N/2)+1` votes required for leadership) is the primary defense. Fencing tokens protect resources accessed post-fail-over from stale leaders.
+
 ## Practical Notes
-- **Kafka** uses a controller (elected via KRaft / Raft since 4.0; via ZooKeeper before) to assign partition leaders. Partition leaders themselves are not elected — the controller picks them from the ISR (in-sync replicas).
+- **Kafka** uses a controller elected via KRaft / Raft to assign partition leaders. Partition leaders themselves are not elected — the controller picks them from the ISR (in-sync replicas). **KRaft timeline**: KRaft went GA in **3.3 (Oct 2022)**, default in 3.5, and ZooKeeper fully removed in Kafka 4.0 (March 2025).
 - **Kubernetes** uses the `coordination.k8s.io/Lease` API for leader election of controllers (kube-controller-manager, kube-scheduler) — a lease-based mechanism backed by etcd.
 - **Always prefer a mature coordination service** (etcd, ZooKeeper, Consul) over rolling your own. Correct leader election is notoriously hard.
 

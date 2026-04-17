@@ -213,12 +213,8 @@ The multiplication `a * b` for `long a, b` silently wraps on overflow. Three def
 3. **`BigInteger` from the start** when inputs can be arbitrarily large. Slower but correct.
 
 ```java
-// Safe modular multiplication when a, b, m all up to 2^62 (mulmod via Math.multiplyHigh)
+// BigInteger path for safety when a*b overflows long.
 long mulMod(long a, long b, long m) {
-    // For m <= ~3e18 this blows up; use BigInteger for full range.
-    long hi = Math.multiplyHigh(a, b);
-    long lo = a * b;
-    // Simplest safe fallback:
     return java.math.BigInteger.valueOf(a)
             .multiply(java.math.BigInteger.valueOf(b))
             .mod(java.math.BigInteger.valueOf(m))

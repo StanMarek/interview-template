@@ -57,6 +57,15 @@ Event 3: MoneyWithdrawn { amount: 50 }
 - **Debugging**: Understand exactly what happened and in what order
 - **Decoupling**: New consumers can subscribe to the event stream and build their own views
 
+### Aggregate
+**Aggregate** — the consistency boundary. Each aggregate instance is a single-writer unit; events within an aggregate are totally ordered. Cross-aggregate consistency is eventual.
+
+### Projections
+Read-side **projections** (aka materialized views, read models) subscribe to the event stream and build query-optimized shapes. Rebuild by replaying from offset 0.
+
+### Event Versioning
+Strategies: (1) weak schema — ignore unknown fields; (2) upcasting — lazy transformation on read; (3) copy-transform — rewrite events in new topic on migration.
+
 ### Challenges
 - **Event schema evolution**: Events are immutable, but their schema needs to change. Use upcasting (transform old events to new schema on read).
 - **Replay performance**: Replaying millions of events is slow. Use **snapshots** — periodically save the derived state so replay starts from the latest snapshot.

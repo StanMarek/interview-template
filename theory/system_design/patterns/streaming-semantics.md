@@ -41,7 +41,7 @@ Event time is what you almost always want, but it introduces a new problem: even
 
 ## Watermarks
 
-A **watermark** is the system's current estimate of "event time has progressed past T". When a watermark of T passes through, the processor assumes it has seen all events with timestamps `<= T - allowed_lateness` and can emit results for windows ending at or before T.
+A **watermark** T asserts "no more events with timestamp ≤ T expected". Windows close at their end-time relative to the watermark. **Allowed Lateness** is a SEPARATE mechanism — additional tolerance window for late events after the watermark passes the window end.
 
 - Too aggressive (tight watermark) → late events are dropped or sent to a late-data side output.
 - Too conservative (loose watermark) → results lag further behind real time.
@@ -119,7 +119,7 @@ Fast producer + slow consumer = unbounded buffer growth = OOM. Solutions:
 | Pulsar          | at-least-once    | yes (transactions, effective-once)           | per partition  |                                        |
 | Flink           | — (processor)    | exactly-once processing via checkpoints      | —              | With Kafka source + checkpoint sink     |
 | Kafka Streams   | — (processor)    | EOS v2 via transactions                      | —              |                                        |
-| Spark Structured Streaming | — (processor) | exactly-once with idempotent sinks | —         | Not "true" EOS without idempotent sink |
+| Spark Structured Streaming | — (processor) | exactly-once natively via checkpointing + idempotent sinks | — | Comparable guarantees to Flink for supported sinks |
 
 ## Design Patterns
 

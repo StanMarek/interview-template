@@ -21,6 +21,9 @@ APIs are the only thing external callers can see. Every decision you make here (
 
 You can mix: gRPC internally, REST externally, GraphQL for BFF. This is common.
 
+### Richardson Maturity Model
+Richardson Maturity Model (Levels 0-3): 0=tunneling, 1=resources, 2=verbs+status codes, 3=hypermedia/HATEOAS. Most "REST" APIs are Level 2. HATEOAS is rare in practice.
+
 ## REST Resource Design Quick Reference
 
 - Nouns for resources, verbs from HTTP: `GET /orders/123`, not `GET /getOrder?id=123`.
@@ -118,7 +121,7 @@ Consistent, machine-parseable errors. HTTP status alone is not enough.
 ### Guidelines
 - Use HTTP status ranges correctly:
   - `4xx` — client's fault, don't retry as-is.
-  - `5xx` — server's fault, **safe to retry** (respect `Retry-After`).
+  - `5xx` — indicates server-side failure, but only idempotent operations (GET/PUT/DELETE, or POSTs with idempotency keys) are safe to retry. Blindly retrying POST without idempotency can double-apply. Retry specifically on 502/503/504; handle 500 case-by-case. Respect `Retry-After`.
   - `429` — rate limited, include `Retry-After` and `RateLimit-*` headers.
   - `409` — conflict (idempotency key mismatch, version conflict).
   - `412` — precondition failed (ETag / `If-Match` mismatch).

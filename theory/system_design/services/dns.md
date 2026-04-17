@@ -44,6 +44,12 @@ Return multiple A records (round-robin). Client picks one. Coarse-grained, no he
 ### Anycast
 Multiple servers advertise the same IP address via BGP. Network routes to the nearest one. Used by CDNs and DNS providers (Cloudflare, Google DNS) for global distribution.
 
+### Encrypted DNS
+**DNS-over-HTTPS (DoH, RFC 8484)** — DNS over HTTPS (port 443). **DNS-over-TLS (DoT, RFC 7858)** — DNS over TLS (port 853). Privacy + integrity; DoH is dominant in browsers (Firefox, Chrome).
+
+### Route 53 Routing Policies
+AWS Route 53 policies: **Simple**, **Weighted** (traffic split), **Latency** (route to lowest-latency region), **Failover** (primary/secondary with health checks), **Geolocation** (continent/country), **Geoproximity** (with traffic-flow bias), **Multivalue answer** (up to 8 healthy records).
+
 ## DNS as a Point of Failure
 DNS is critical — if DNS fails, nothing works. Mitigations:
 - Multiple authoritative nameservers (minimum 2, preferably on different providers)

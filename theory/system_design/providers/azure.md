@@ -44,7 +44,7 @@
 | L7 Load Balancer | **Application Gateway** | HTTP routing, SSL termination, WAF |
 | Global L7 LB + CDN | **Azure Front Door** | Global load balancing, CDN, WAF, SSL offload |
 | API Gateway | **Azure API Management (APIM)** | Full API lifecycle: gateway, developer portal, analytics |
-| Service mesh | **Istio-based service mesh on AKS** | Managed Istio add-on (Open Service Mesh was retired in 2024) |
+| Service mesh | **Istio-based service mesh on AKS** | Managed Istio add-on. Open Service Mesh reached end-of-life **April 30, 2025** (announced retirement in 2024). Migrate to Istio, Linkerd, or Azure Service Mesh (Istio-based add-on for AKS). |
 | Private connectivity | **Private Link** | Access services over private endpoint |
 
 ## Messaging & Streaming

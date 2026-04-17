@@ -243,7 +243,8 @@ class UnionFind {
     boolean connected(int x, int y) { return find(x) == find(y); }
 }
 // Path compression + union by rank → O(α(n)) ≈ O(1) amortized (inverse Ackermann).
-// Either optimization alone is O(log n); you want BOTH for the near-constant bound.
+// Path compression alone: O(log n) amortized. Union by rank alone: O(log n) worst-case per op.
+// Both together: O(α(n)) amortized (inverse Ackermann — effectively constant).
 // Union by size works equally well — replace `rank` with subtree size and merge smaller under larger.
 ```
 
@@ -332,6 +333,8 @@ Search from both source and target, alternating the **smaller frontier** each st
 
 Dijkstra + admissible heuristic `h(n)`. Uses priority `f(n) = g(n) + h(n)`. `h` must **never overestimate** the true remaining cost (e.g., Manhattan distance on a grid). Optimal iff heuristic is admissible; consistent heuristic also gives monotone `f`.
 
+Admissibility guarantees optimality for tree search; **consistency** (monotonicity) is required for graph search without re-expansions. Consistency implies admissibility.
+
 ### 12. Floyd-Warshall (All-Pairs Shortest Path)
 
 `O(V³)` time, `O(V²)` space. Handles negative edges (no negative cycles). Good for small, dense graphs.
@@ -350,7 +353,7 @@ for (int k = 0; k < n; k++)           // intermediate
 // Negative cycle iff any dist[i][i] < 0 after the loop.
 ```
 
-**Johnson's algorithm** is the sparse alternative: O(V·E + V² log V) using Bellman-Ford reweighting + Dijkstra from every node. Better than Floyd-Warshall when E ≪ V².
+**Johnson's algorithm** is the sparse alternative: O(V·E + V² log V) (with Fibonacci heap; binary heap gives O(V·E log V)) using Bellman-Ford reweighting + Dijkstra from every node. Better than Floyd-Warshall when E ≪ V².
 
 ### 13. Tarjan's SCC & Bridges / Articulation Points
 

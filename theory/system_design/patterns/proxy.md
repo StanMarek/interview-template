@@ -10,6 +10,11 @@ Sits in front of **servers**. The client sends requests to the proxy, which forw
 
 **Use cases**: Load balancing, SSL termination, caching, compression, DDoS protection, serving static content.
 
+## TLS Termination vs Passthrough vs Re-encryption
+- **Termination** — decrypt at proxy, forward as HTTP; standard for L7 features.
+- **Passthrough** — forward encrypted TCP unchanged; required for mTLS end-to-end.
+- **Re-encryption** — decrypt, inspect, re-encrypt with different cert; common at gateway edge where internal network uses different PKI.
+
 ## Reverse Proxy vs Load Balancer
 All load balancers are reverse proxies, but not all reverse proxies are load balancers. A reverse proxy can serve a single backend server (for SSL termination, caching), while a load balancer specifically distributes traffic across multiple servers.
 

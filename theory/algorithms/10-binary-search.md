@@ -248,6 +248,6 @@ public double findMedianSortedArrays(int[] A, int[] B) {
 - **Off-by-one:** The most common bug. Test with arrays of size 0, 1, and 2 to catch it.
 - **Monotonic condition is key:** Binary search works whenever you have a predicate that's false for some prefix and true for the rest (or vice versa).
 - **Half-open `[lo, hi)`** with `hi = n` and `lo < hi` is the safest default for boundary searches — `lo` converges to the answer (or `n` if no index satisfies).
-- **Rightmost-true needs biased mid** (`lo + (hi - lo) / 2 + 1`) when `lo = mid`, otherwise `lo + 1 == hi` loops forever.
+- **Note:** If using the alternate form with `lo = mid` (inclusive-hi), use `lo + (hi - lo) / 2 + 1` to avoid infinite loop when `lo + 1 == hi`. The template above uses half-open `[lo, hi)` with `lo = mid + 1`, which doesn't need a biased mid.
 - **Prefer `TreeSet.floor/ceiling/higher/lower`** over hand-rolled binary search on dynamic sorted data.
 - **`Arrays.binarySearch` caveat:** if duplicates exist, it returns *some* matching index — not the first. Use `lowerBound` when you need a specific occurrence.

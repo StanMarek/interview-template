@@ -23,7 +23,10 @@ Databases designed to store and query data modeled as nodes (entities) and edges
 - Analytics/aggregations over large datasets (use columnar/OLAP)
 
 ## Graph vs Relational for Relationships
-Finding "friends of friends of friends" in SQL requires 3 self-joins on a potentially huge table — O(N³). In a graph DB, it's a 3-hop traversal — O(degree³), typically much faster because it only follows known edges rather than scanning the entire table.
+Finding "friends of friends of friends" in SQL requires 3 self-joins on a potentially huge table — O(N³). In a graph DB, it's a 3-hop traversal — O(k) where k = edges traversed — traversal cost is independent of total graph size (the key advantage over SQL joins).
+
+## RDF vs Property Graph
+**RDF / triple store** (subject-predicate-object) — SPARQL query language, reasoning/inference support. Neptune supports both via separate endpoints. **Property graph** (nodes+edges with key-value props) — Cypher or Gremlin. Neo4j is property-graph only.
 
 ## Implementations
 

@@ -30,6 +30,9 @@ For 1% false positive rate with 1 billion elements: ~1.2 GB of memory. Storing t
 ### Counting Bloom Filter
 Replace each bit with a counter. Supports deletion (decrement counters). Uses more memory.
 
+### Cuckoo Filter
+**Cuckoo filter** — modern alternative supporting deletion with ~lower space overhead than counting bloom at similar false-positive rates. Worth knowing for senior interviews.
+
 ## Real-World Uses
 - **Database queries**: Check if a key exists before doing an expensive disk read (HBase, Cassandra, LevelDB)
 - **Web crawlers**: "Have I already crawled this URL?" (billions of URLs)

@@ -5,7 +5,7 @@
 |---------|------------|-------|
 | Virtual machines | **Compute Engine** | Predefined and custom machine types, preemptible/spot VMs |
 | Containers (managed) | **Cloud Run** | Serverless containers, auto-scaling to zero, pay-per-request |
-| Kubernetes (managed) | **GKE** (Google Kubernetes Engine) | Most mature managed K8s (Google invented Kubernetes) |
+| Kubernetes (managed) | **GKE** (Google Kubernetes Engine) | Most mature managed K8s (Google invented Kubernetes). **GKE Standard** — you manage nodes, full control. **GKE Autopilot** — Google manages nodes, pay-per-pod, opinionated security defaults. |
 | Serverless functions | **Cloud Functions** | Event-driven, Node/Python/Go/Java |
 | Batch processing | **Batch** | Managed batch jobs on Compute Engine |
 | App hosting (PaaS) | **App Engine** | Fully managed PaaS (Standard or Flexible) |
@@ -24,7 +24,7 @@
 | Managed MySQL/PostgreSQL/SQL Server | **Cloud SQL** | Automated backups, replicas, HA; Enterprise Plus edition |
 | Cloud-native distributed SQL | **Cloud Spanner** | Globally distributed, strongly consistent, horizontally scalable SQL. Uses TrueTime. Now supports PostgreSQL dialect, vector search, full-text search, and Spanner Graph (2024). |
 | Managed PostgreSQL (advanced) | **AlloyDB** | PostgreSQL-compatible, 4x faster OLTP, 100x faster analytics vs standard PostgreSQL; AlloyDB Omni runs anywhere; AlloyDB AI for vector/embeddings |
-| Managed NoSQL (document) | **Firestore** | Serverless, real-time sync; Firestore with MongoDB compatibility (2024/2025) |
+| Managed NoSQL (document) | **Firestore** | Serverless, real-time sync. Firestore with MongoDB compatibility — **preview April 2025, GA August 26, 2025**. Drop-in MongoDB wire protocol compatibility for Firestore Native mode. **Firestore Native mode** — real-time listeners, offline support, mobile SDKs. **Datastore mode** — backwards compatible with App Engine Datastore, no real-time listeners. Must pick at project creation, cannot change. |
 | Managed wide-column | **Cloud Bigtable** | HBase-compatible, massive scale, low latency. Powers Gmail, Maps, Search. SQL support added. |
 | Managed Redis/Memcached/Valkey | **Memorystore** | Memorystore for Redis Cluster, Memcached, and Valkey (added 2024) |
 | Data warehouse | **BigQuery** | Serverless, petabyte-scale, SQL, separated storage+compute. BigLake, BigQuery ML, vector search. |
@@ -46,7 +46,7 @@
 ## Messaging & Streaming
 | Concept | GCP Service | Notes |
 |---------|------------|-------|
-| Pub/Sub (queue + fan-out) | **Pub/Sub** | Serverless, at-least-once, global. Unifies queuing and pub/sub. |
+| Pub/Sub (queue + fan-out) | **Pub/Sub** | Serverless, global. Unifies queuing and pub/sub. **Cloud Pub/Sub**: at-least-once default; **exactly-once delivery** (since 2023, opt-in via `enable_exactly_once_delivery`); **ordering keys** for per-key ordered delivery; push and pull subscriptions. |
 | Event streaming (Kafka) | **Managed Service for Apache Kafka** | Fully managed Kafka |
 | Stream processing | **Dataflow** | Managed Apache Beam (batch + stream unified) |
 | Workflow orchestration | **Workflows** | Serverless workflow orchestration |
@@ -73,7 +73,7 @@
 ## Data & Analytics
 | Concept | GCP Service | Notes |
 |---------|------------|-------|
-| Data warehouse | **BigQuery** | Serverless SQL, ML built-in (BQML), BI Engine, Gemini-in-BigQuery assistant |
+| Data warehouse | **BigQuery** | Serverless SQL, ML built-in (BQML), BI Engine, Gemini-in-BigQuery assistant. Pricing: **On-demand** ($6.25/TiB scanned) or **Editions** (Standard / Enterprise / Enterprise Plus — reservation-based, replaced flat-rate in 2023). BI Engine for sub-second queries. |
 | Cross-cloud analytics | **BigQuery Omni** | Run BigQuery over data in AWS S3 and Azure Blob without moving it |
 | Lakehouse table format | **BigLake** | Unifies BigQuery + open formats (Iceberg, Delta, Hudi) over GCS; BigLake Managed Tables for Iceberg |
 | ETL / data integration | **Dataflow** (Apache Beam) | Unified batch + streaming ETL |

@@ -17,8 +17,17 @@ Store raw data in any format (structured, semi-structured, unstructured) at any 
 - **Examples**: S3 + Athena, HDFS + Spark, Delta Lake
 
 ## Data Lakehouse
-Combines the best of both: raw storage of a data lake with the structured querying and ACID transactions of a warehouse.
-- **Examples**: Databricks (Delta Lake), Apache Iceberg, Apache Hudi
+**Lakehouse** is an architecture pattern combining data lake storage with warehouse-grade ACID semantics. Enabled by open table formats: **Delta Lake** (Databricks origin), **Apache Iceberg** (Netflix origin, now Linux Foundation), **Apache Hudi** (Uber origin). These provide ACID transactions, schema evolution, time travel over parquet files in S3/GCS/ADLS.
+
+Delta Lake, Iceberg, and Hudi are **table formats**, not lakehouses themselves — a lakehouse is the architecture built on top of them.
+
+### Medallion Architecture
+Bronze (raw ingest) → Silver (cleaned/conformed) → Gold (business-ready/aggregated). Common Databricks convention; applies to any lakehouse.
+
+## Warehouse Architecture Comparison
+- **Snowflake** — separates storage/compute, multi-cluster shared data.
+- **BigQuery** — serverless, Dremel-based columnar, tree execution.
+- **Redshift** — MPP shared-nothing (RA3 instances separate storage via Managed Storage).
 
 ## ETL vs ELT
 - **ETL** (Extract, Transform, Load): Transform before loading into warehouse. Traditional approach.

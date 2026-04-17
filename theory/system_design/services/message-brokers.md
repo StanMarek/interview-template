@@ -74,6 +74,9 @@ A traditional message broker implementing AMQP (Advanced Message Queuing Protoco
 - When you need per-message acknowledgment and redelivery
 - Lower throughput, higher routing flexibility than Kafka
 
+### RabbitMQ Delivery Semantics
+RabbitMQ supports **at-most-once** (no publisher confirms, auto-ack) and **at-least-once** (publisher confirms + consumer acks). **Exactly-once** requires application-level idempotency — RabbitMQ does NOT natively provide exactly-once.
+
 ## Kafka vs RabbitMQ
 
 | Feature | Kafka | RabbitMQ |
@@ -100,6 +103,12 @@ A traditional message broker implementing AMQP (Advanced Message Queuing Protoco
 | **NATS** | Lightweight, high-performance. JetStream for persistence. |
 | **Apache Pulsar** | Multi-tenant, geo-replication, tiered storage. Kafka alternative. |
 | **Redis Streams** | Lightweight streaming within Redis. Good for simple use cases. |
+
+### Apache Pulsar
+**Apache Pulsar** — built-in async geo-replication between clusters at the namespace/topic level. Multi-tenant with namespaces. Tiered storage to S3.
+
+### NATS JetStream
+**NATS JetStream** — persistent layer atop NATS core pub/sub. At-least-once, exactly-once via dedup headers, replicas via Raft.
 
 ## Possible Interview Questions
 1. "When would you choose Kafka over RabbitMQ?"

@@ -79,7 +79,7 @@ class Trie {
 | Search        | O(m)   |                              |
 | Prefix search | O(m)   |                              |
 | Delete        | O(m)   |                              |
-| Space         | O(N*M) | N words, M avg length (worst case) |
+| Space         | O(N*M) | N words, M avg length (worst case). With fixed-size children arrays (alphabet σ): O(N·M·σ) in the worst case. With HashMap children: O(total unique characters stored). |
 
 **Trie vs. HashMap:**
 - Trie: O(m) search, prefix-friendly, space efficient for shared prefixes

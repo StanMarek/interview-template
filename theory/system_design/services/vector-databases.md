@@ -16,6 +16,7 @@ Traditional B-tree / inverted indexes answer exact-match or keyword queries. The
 ### ANN Index Types
 | Index | How It Works | Trade-off |
 |-------|--------------|-----------|
+| **FLAT (brute-force)** | Exact k-NN via linear scan | Used as baseline / ground-truth. Acceptable up to ~100K vectors; O(N×D) per query. |
 | **HNSW** (Hierarchical Navigable Small World) | Multi-layer graph; greedy traversal | Fast queries, high recall; high memory (graph in RAM) |
 | **IVF** (Inverted File) | Cluster vectors into cells; probe nearest cells | Lower memory, slightly lower recall; needs training |
 | **IVF-PQ** (Product Quantization) | IVF + compression of residuals | Massive memory savings, some accuracy loss |
@@ -26,6 +27,9 @@ HNSW is the de-facto default for most workloads in 2025.
 
 ### Recall vs Latency
 ANN trades exactness for speed. You tune `efSearch` (HNSW) or `nprobe` (IVF) to trade off query latency vs recall@K. Recall of 0.95-0.99 is typical for production.
+
+### Matryoshka Embeddings
+**Matryoshka Representation Learning** (OpenAI text-embedding-3-large supports it) — embeddings trained so leading prefix dimensions preserve semantic similarity. Truncate from 3072 → 1536 → 768 dims for cost/quality tradeoff without re-embedding.
 
 ## Implementations
 

@@ -46,7 +46,7 @@ Node.js runs on a **single-threaded event loop** backed by libuv. Every I/O oper
 | Real-time applications | WebSocket-native, event-driven architecture maps naturally to push-based systems |
 | API gateways / BFF layers | Excellent at orchestrating multiple downstream service calls concurrently |
 | Streaming / data pipelines | Native `Stream` API enables backpressure-aware data processing |
-| Microservices | Fast startup time (<100ms), small memory footprint (~30MB base), fast iteration |
+| Microservices | Fast startup time (<100ms), small memory footprint (~40-60MB RSS for a trivial HTTP server on Node 20/22 baseline), fast iteration |
 | SSR for React/Next.js | Same language for server and client, shared validation, isomorphic rendering |
 | CLI tools and build systems | npm ecosystem, fast scripting, cross-platform compatibility |
 
@@ -82,7 +82,7 @@ ceiling, SPOF                       network complexity
 | Strategy | How It Works | Pros | Cons |
 |----------|-------------|------|------|
 | `cluster` module | Master process forks N workers, shares a TCP port | Built-in, zero dependencies | Manual health monitoring, no log aggregation |
-| PM2 | Process manager: cluster mode, auto-restart, monitoring | Production-ready, `pm2 monit`, ecosystem file | Extra runtime dependency, PM2 daemon overhead |
+| PM2 | Process manager: cluster mode, auto-restart, monitoring | Still used on bare VMs and small deployments, `pm2 monit`, ecosystem file — but largely supplanted by Kubernetes / Docker / systemd in modern production | Extra runtime dependency, PM2 daemon overhead |
 | Container orchestration (K8s) | One process per container, horizontal pod autoscaler | Industry standard, health checks, rolling deploys | Operational complexity, learning curve |
 | Systemd + Nginx | OS-level process management with reverse proxy | Lightweight, no extra runtime | Manual scaling, limited orchestration |
 
@@ -627,6 +627,8 @@ io.to("org:acme-corp").emit("notification", {
   payload: { text: "Hello everyone" },
 });
 ```
+
+> **Sticky sessions are ONLY required with polling transport.** With WebSocket-only transport (set `transports: ['websocket']`), sticky is unnecessary; the Redis adapter still handles cross-node events. Polling needs sticky because each XHR poll is a fresh HTTP request that must land on the server holding the session state. Upgrading to WS creates one long-lived connection that naturally stays on a single node.
 
 ### GraphQL Subscriptions
 
@@ -1222,7 +1224,7 @@ class OrderAggregate {
 | Cassandra | AP | Eventual consistency, tunable with consistency level |
 | Redis Cluster | AP | Async replication, possible data loss on failover |
 | CockroachDB | CP | Consistent but higher write latency across regions |
-| DynamoDB | AP (default), CP (strong reads) | Configurable per-query consistency |
+| DynamoDB | CP (tunable reads) | Single-region: eventually-consistent by default, strong consistency per-request. Global Tables: LWW across regions (effectively AP). |
 
 **Senior interview insight**: In distributed systems, partition tolerance is non-negotiable. The real choice is between CP and AP. Most Node.js services use AP systems (Redis, Cassandra, DynamoDB) for speed and accept eventual consistency, then use compensating mechanisms (reconciliation jobs, conflict resolution) for correctness.
 
@@ -1468,7 +1470,7 @@ const result = await retryWithBackoff(
 //    -> External API: 3s budget (with circuit breaker)
 // -> Service B: 4s budget
 
-import { AbortController } from "node:abort_controller";
+// AbortController is a global since Node 15+ — no import needed.
 
 async function withTimeout<T>(
   fn: (signal: AbortSignal) => Promise<T>,

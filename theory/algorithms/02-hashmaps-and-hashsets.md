@@ -9,9 +9,9 @@ Hash-based data structures provide average O(1) lookup, insertion, and deletion.
 ### How Hashing Works
 
 1. A **hash function** converts a key to an integer (hash code).
-2. The hash code is mapped to a **bucket index** (usually `hashCode % capacity`).
+2. The hash code is mapped to a **bucket index** via `(n - 1) & hash` where `n` is the power-of-2 table capacity, after an internal `hash ^ (hash >>> 16)` spread. NOT modulo — Java HashMap uses a power-of-2 capacity + bitmask.
 3. **Collisions** (multiple keys → same bucket) are resolved via chaining (linked list / tree) or open addressing.
-4. When the **load factor** exceeds a threshold (default 0.75 in Java), the table **rehashes** — doubles capacity and redistributes entries.
+4. When the **load factor** exceeds a threshold (default 0.75 in Java), the table **rehashes** when `size > capacity * loadFactor` (threshold); table capacity doubles on resize.
 
 ### Java Implementations
 
@@ -92,7 +92,7 @@ ss.addFirst(0);                          // if already present, moves to head
 | containsKey   | O(1)*    | O(log n)   | O(1)*         |
 | Ordered       | No       | Yes (natural) | Yes (insertion) |
 
-*Average case. Worst case is O(n) with bad hash functions (O(log n) since Java 8 with tree bins).
+*Average case. Worst case is O(n) with bad hash functions (O(log n) since Java 8 with tree bins). Note: O(log n) worst case in tree bins only applies when keys are `Comparable`; non-Comparable keys fall back to O(n) list traversal even in tree bins.
 
 ### Implementing `hashCode()` and `equals()`
 

@@ -265,7 +265,7 @@ Estimate cost as **(branches per node) ^ depth × work per leaf**:
 | Permutations | n, n-1, … | n | O(n · n!) | O(n) recursion, O(n · n!) output |
 | Combination Sum | up to k | target/min | O(N^(T/M + 1)) | O(T/M) |
 | N-Queens | n per row | n | O(n!) (pruned) | O(n^2) board |
-| Palindrome Partitioning | up to n | n | O(n · 2^n) | O(n) |
+| Palindrome Partitioning | up to n | n | O(n² · 2^n) naive / O(n · 2^n) with DP precompute | O(n) |
 | Sudoku | up to 9 per cell | 81 | exp. (heavy prune) | O(1) |
 
 Copying a length-k list into the result is O(k); multiply through if relevant.

@@ -32,7 +32,9 @@ Assign rows to shards based on value ranges of the shard key.
 ### 2. Hash-Based Sharding
 `shard = hash(shard_key) % num_shards`
 - **Pros**: Uniform distribution
-- **Cons**: Range queries scatter across all shards; adding/removing shards requires rehashing (use consistent hashing to mitigate)
+- **Cons**: Range queries scatter across all shards; adding/removing shards requires rehashing
+
+Note: Consistent hashing is a separate technique — not "hash % N" plus mitigation. It uses a fixed ring with `hash(key)` → walk clockwise to find the owning node. Node changes affect only ~1/N of keys.
 
 ### 3. Directory-Based Sharding
 A lookup service maps each key to its shard. Maximum flexibility.

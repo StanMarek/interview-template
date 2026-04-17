@@ -33,10 +33,12 @@ Outgoing bandwidth = read_QPS × avg_response_size
 
 ### Servers
 ```
-If one server handles ~1000 QPS (typical web server):
-Servers needed = peak_QPS / 1000
+If one server handles ~10,000 QPS (middle-of-the-road estimate for Node/Go/Java):
+Servers needed = peak_QPS / 10,000
 Add 2-3x for redundancy
 ```
+
+> Exact throughput depends heavily on work per request; use measured RPS from load tests in real capacity plans.
 
 ## Numbers You Must Know
 
@@ -82,7 +84,7 @@ Add 2-3x for redundancy
 | Network: same datacenter RTT | ~0.5 ms |
 | Network: same continent RTT | ~10-30 ms |
 | Network: cross-continent RTT (e.g. CA → Europe) | ~100-150 ms |
-| TLS handshake (TLS 1.3 0-RTT) | ~0-1 RTT |
+| TLS 1.3 full handshake | 1-RTT (0-RTT only for session resumption; carries replay-attack risk for non-idempotent requests) |
 | TLS handshake (TLS 1.2) | ~2 RTTs |
 | Read 1 MB sequentially from DRAM | ~100-250 μs |
 | Read 1 MB sequentially from NVMe SSD | ~200-500 μs |

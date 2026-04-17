@@ -58,7 +58,7 @@ bst.higherKey(5);      // smallest key > 5
 ### Self-Balancing Trees: AVL vs Red-Black
 
 - **AVL:** Strictly balanced (height diff ≤ 1). Faster lookups, more rotations on insert/delete. Good for read-heavy.
-- **Red-Black:** Loosely balanced (longest path ≤ 2× shortest). Fewer rotations, faster mutations. **Java's `TreeMap`/`TreeSet` use Red-Black trees.** `HashMap` buckets also convert to Red-Black trees when a bucket exceeds 8 entries (treeify threshold).
+- **Red-Black:** Loosely balanced (longest path ≤ 2× shortest). Fewer rotations, faster mutations. **Java's `TreeMap`/`TreeSet` use Red-Black trees.** `HashMap` buckets also convert to Red-Black trees when a bucket exceeds 8 entries (treeify threshold) AND table size ≥ 64 (`MIN_TREEIFY_CAPACITY`); otherwise the table resizes instead.
 
 ## Tree Traversals
 

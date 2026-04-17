@@ -115,7 +115,7 @@ public ListNode detectCycle(ListNode head) {
 }
 ```
 
-> **Brent's algorithm** is an alternative to Floyd's: the hare moves alone, the tortoise teleports to the hare every power-of-2 steps. Same O(n) time, O(1) space, ~36% fewer pointer moves on average, and it finds cycle length directly. Floyd's is the interview-standard answer; mention Brent if asked for alternatives.
+> **Brent's algorithm** is an alternative to Floyd's: the hare moves alone, the tortoise teleports to the hare every power-of-2 steps. Same O(n) time, O(1) space, ~24-36% fewer pointer moves than Floyd's (depending on input), and it finds cycle length directly. Floyd's is the interview-standard answer; mention Brent if asked for alternatives.
 
 ### 3. Reverse a Linked List
 

@@ -23,6 +23,12 @@ A monitor actively pings each node. Three levels:
 ## Accrual Failure Detector (Phi Accrual)
 Instead of binary alive/dead, compute a **suspicion level** (phi) based on the distribution of heartbeat intervals. Higher phi = more likely dead. Used by Akka and Cassandra.
 
+**Phi Accrual Failure Detector** (Cassandra, Akka) — phi = -log₁₀(P(node alive given last heartbeat time)). Continuous suspicion score rather than binary up/down. Threshold ~8-10 typical. Adapts to network jitter.
+
+## Deadline vs Periodic
+- **Periodic** — fixed interval (e.g., every 1s).
+- **Deadline-based** — next expected heartbeat at T+interval; miss = suspect. Deadline handles clock skew better.
+
 ## Gossip Protocol
 In peer-to-peer systems, nodes gossip about each other's health. Each node periodically picks a random peer and exchanges membership information. Information propagates exponentially (O(log N) rounds to reach all nodes). Scales to thousands of nodes without a central coordinator.
 

@@ -7,7 +7,8 @@ In-memory data stores that provide sub-millisecond latency for read/write operat
 In March 2024, Redis Inc. relicensed Redis from the permissive BSD license to dual SSPL / RSALv2 — non-OSI-approved source-available licenses that restrict commercial managed-service use. In response:
 - **Valkey** was forked from Redis 7.2.4 under the BSD license by the Linux Foundation. It is backed by AWS, Google, Oracle, Ericsson, and Snap, and is a drop-in Redis-compatible replacement.
 - AWS ElastiCache, Google Memorystore, and most cloud providers have switched their "Redis" offerings to Valkey.
-- **Redis 8 (2025)** relicensed again to AGPLv3 (OSI-approved) in an attempt to reunify, but the fork persists. Valkey 8.x ships with async I/O and roughly 2-3x throughput improvements over Redis 7.
+- **Redis 8 (May 2025)** — **tri-licensed**: RSALv2, SSPLv1, AND AGPLv3. The AGPLv3 option makes Redis 8 OSI-approved open source again. Valkey 8.0 (late 2024) added asynchronous I/O threading and multi-threaded command execution — **up to ~2x throughput** on some workloads (benchmark-dependent).
+- **ElastiCache Serverless** (launched Nov 2023) — auto-scales capacity, per-second pricing, zero ops. Supports Redis (now Valkey) and Memcached engines.
 - In interview answers, "Redis" and "Valkey" are interchangeable API-wise — but mention the split if asked about licensing or multi-cloud deployments.
 
 ## Redis vs Memcached

@@ -26,6 +26,23 @@ Decoupling producers from consumers is fundamental to scalable, resilient system
 
 In practice, **at-least-once + idempotent consumers** is the standard approach.
 
+## RabbitMQ Exchanges
+Exchanges route messages to queues:
+- **direct** — exact routing key match
+- **topic** — wildcard routing key match (`*` = one word, `#` = zero or more)
+- **fanout** — broadcast to all bound queues
+- **headers** — match on header values
+
+Exchange type is the primary design lever.
+
+## SQS Limits
+- **SQS Standard**: 256 KB max message size, 14-day max retention, visibility timeout 30s default.
+- **SQS FIFO**: 300 TPS without batching, 3000 TPS with batching.
+- Both support DLQ via redrive policy.
+
+## Kafka Consumer Group Mapping
+Within a consumer group: one partition → at most one consumer. More consumers than partitions = idle consumers. Repartitioning breaks key → partition mapping (critical gotcha).
+
 ## Key Patterns
 
 ### Work Queue (Competing Consumers)

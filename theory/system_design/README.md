@@ -197,8 +197,8 @@ Standalone reference diagrams also live in `/diagrams`: `caching.png`, `cap_theo
 
 | Unit | Value |
 |------|-------|
-| 1 char | 1 byte (ASCII) / 2-4 bytes (UTF-8) |
-| UUID | 16 bytes (binary) / 36 bytes (string) |
+| 1 char | 1 byte (ASCII) / 1-4 bytes (UTF-8: ASCII is 1 byte in UTF-8 too; non-ASCII 2-4 bytes) |
+| UUID | 16 bytes binary / 32 hex chars / 36 chars with hyphens |
 | 1 KB | 1,000 bytes |
 | 1 MB | 1 million bytes |
 | 1 GB | 1 billion bytes |

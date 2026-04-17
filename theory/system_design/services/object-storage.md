@@ -9,7 +9,7 @@ Object storage stores data as objects (blobs) in a flat namespace, each identifi
 - **HTTP API**: PUT/GET/DELETE via REST. No filesystem mounting.
 - **Massive scale**: Virtually unlimited storage. Exabytes across providers.
 - **High durability**: 99.999999999% (11 nines) durability. Data replicated across multiple facilities.
-- **Eventual consistency**: Historically; most major providers now offer strong read-after-write consistency.
+- **Eventual consistency**: Historically; most major providers now offer strong read-after-write consistency. **S3 achieved strong read-after-write consistency for all operations (GET, PUT, LIST) in December 2020** — no longer eventual for new objects. Prior folklore about "upload+immediate-list" caveats is outdated.
 
 ## Storage Classes / Tiers
 
@@ -20,6 +20,15 @@ Object storage stores data as objects (blobs) in a flat namespace, each identifi
 | **Archive** | Yearly access | Cheapest storage, high retrieval cost & latency | S3 Glacier, GCS Archive |
 
 **Lifecycle policies** automatically transition objects between tiers based on age or access patterns.
+
+### Glacier Tiers
+**S3 Glacier Instant Retrieval** (ms access, cheaper than Standard-IA for rarely-accessed data), **S3 Glacier Flexible Retrieval** (1min-12hr retrieval), **S3 Glacier Deep Archive** (12hr retrieval, lowest cost).
+
+### S3 Select
+**S3 Select** — push-down SQL filtering on CSV/JSON/Parquet in S3. Avoids transferring full objects. Replaced by more flexible Athena/Iceberg for many use cases.
+
+### GCS vs Azure Blob
+**GCS** storage classes: Standard, Nearline (30d), Coldline (90d), Archive (365d). **Azure Blob** tiers: Hot, Cool, Cold, Archive. Similar pricing model to S3 IA/Glacier tiers.
 
 ## Common Use Cases
 - **Static asset storage**: Images, videos, CSS, JS served via CDN

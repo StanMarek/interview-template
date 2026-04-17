@@ -203,7 +203,7 @@ const config: Config = {
     '^@/(.*)$': '<rootDir>/src/$1',        // Path aliases
     '\\.(css|less)$': 'identity-obj-proxy', // CSS modules
   },
-  setupFilesAfterFramework: ['<rootDir>/jest.setup.ts'],
+  setupFilesAfterEach: ['<rootDir>/jest.setup.ts'],
   coverageProvider: 'v8',                   // Faster than babel/istanbul
   transform: {
     '^.+\\.tsx?$': ['ts-jest', { tsconfig: 'tsconfig.test.json' }],
@@ -348,12 +348,14 @@ describe('UserService', () => {
 
 Run with: `node --test --experimental-strip-types src/**/*.test.ts`
 
+> **Version note**: `--experimental-strip-types` is available in Node 22.6+; unflagged in Node 23.6+. Older Node versions will error on this flag.
+
 ### Comparison Table
 
 | Feature | Jest | Vitest | node:test |
 |---------|------|--------|-----------|
 | ESM Support | Experimental (`--experimental-vm-modules`) | Native | Native |
-| TypeScript | Via `ts-jest` or `@swc/jest` | Via Vite transforms (esbuild) | `--experimental-strip-types` (Node 22+) |
+| TypeScript | Via `ts-jest` or `@swc/jest` | Via Vite transforms (esbuild) | `--experimental-strip-types` (Node 22.6+; unflagged 23.6+) |
 | Module Mocking | `jest.mock()` with hoisting | `vi.mock()` with `vi.hoisted()` | `mock.module()` (experimental) |
 | Watch Mode | File-system based | Vite HMR graph (smarter) | `--watch` (basic) |
 | Snapshot Testing | Built-in | Built-in (compatible) | `assert.snapshot()` (Node 22+) |
@@ -1082,7 +1084,7 @@ test.describe('Order management', () => {
 | Feature | Playwright | Cypress |
 |---------|-----------|---------|
 | Architecture | Runs outside browser via CDP/WebDriver BiDi | Runs inside browser (same-origin) |
-| Multi-browser | Chromium, Firefox, WebKit | Chromium, Firefox, WebKit (limited) |
+| Multi-browser | Chromium, Firefox, WebKit | Chromium, Firefox, Edge (WebKit is **experimental** only — not production-ready) |
 | Multi-tab/window | Full support | Not supported |
 | iframes | Full support | Partial (same-origin only by default) |
 | Auto-waiting | Built-in (actionability checks) | Built-in (retry-ability) |

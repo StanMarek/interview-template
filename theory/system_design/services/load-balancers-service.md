@@ -59,6 +59,15 @@ Operates at HTTP/HTTPS level. Inspects headers, URLs, cookies, and payload to ma
 | GCP | Network LB | HTTP(S) LB |
 | Azure | Azure Load Balancer | Application Gateway |
 
+### AWS GWLB
+**GWLB (Gateway Load Balancer)** — L3 LB for inline network appliances (firewalls, IDS/IPS). Uses GENEVE encapsulation on port 6081. Transparently inserts security appliances in traffic path.
+
+### GCP Cloud Load Balancing (2022+ rebrand)
+**Global External Application LB** (L7), **Regional External Application LB**, **Internal Application LB** (cross-region available), **Network LB** (L4).
+
+### Azure
+**Azure Front Door** — global L7 anycast LB + CDN + WAF. Analogous to CloudFront+Global ALB combo. **Application Gateway** is regional L7; **Azure LB** is L4.
+
 ## Health Check Types
 - **TCP check**: Can we open a TCP connection? (L4)
 - **HTTP check**: Does `GET /health` return 200? (L7)

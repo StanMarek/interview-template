@@ -14,44 +14,29 @@ fast for cold code.
 ### The Pipeline: Source to Machine Code
 
 ```
-                         V8 Compilation Pipeline
- ┌──────────┐    ┌───────┐    ┌──────────┐    ┌──────────────┐    ┌────────────┐
- │  Source   │───►│ Parse │───►│   AST    │───►│   Ignition   │───►│  Bytecode  │
- │  Code     │    │       │    │          │    │ (Interpreter)│    │            │
- └──────────┘    └───────┘    └──────────┘    └──────────────┘    └─────┬──────┘
-                                                                        │
-                                                         Execute &      │
-                                                         Collect Type   │
-                                                         Feedback       │
-                                                                        ▼
-                                                                  ┌──────────┐
-                                                                  │  Type    │
-                                                                  │ Feedback │
-                                                                  │ Vectors  │
-                                                                  └────┬─────┘
-                                                                       │
-                                                        Hot function    │
-                                                        detected        ▼
-                                                                  ┌──────────────┐
-                                                                  │   TurboFan   │
-                                                                  │ (Optimizing  │
-                                                                  │  Compiler)   │
-                                                                  └──────┬───────┘
-                                                                         │
-                                                                         ▼
-                                                                  ┌──────────────┐
-                                                                  │  Optimized   │
-                                                                  │ Machine Code │
-                                                                  └──────────────┘
-                                                                         │
-                                                         Type assumption │
-                                                         violated        ▼
-                                                                  ┌──────────────┐
-                                                                  │  Deoptimize  │
-                                                                  │ (Bail out to │
-                                                                  │  Bytecode)   │
-                                                                  └──────────────┘
+                    V8 Compilation Pipeline (4-tier, modern V8)
+
+ Source ──► Parse ──► AST ──► Ignition (interpreter) ──► Bytecode
+                                    │
+                                    ▼  (hot on first run)
+                              Sparkplug (non-optimizing baseline JIT, V8 9.1+)
+                                    │
+                                    ▼  (~300–500 invocations)
+                              Maglev   (mid-tier optimizer, default in
+                                        Node 22 / V8 11.9+)
+                                    │
+                                    ▼  (~10,000 invocations, or sooner via OSR)
+                              TurboFan (top-tier optimizer)
+                                    │
+                           Type assumption violated
+                                    ▼
+                              Deoptimize → back down the tiers
 ```
+
+**Tier-up thresholds (approximate):**
+- **Sparkplug**: compiles immediately on first run for hot functions (no tier-up threshold — it is a fast baseline JIT producing unoptimized machine code from bytecode).
+- **Maglev**: ~300–500 invocations. Produces good machine code without TurboFan's full analysis cost.
+- **TurboFan**: ~10,000 invocations (or sooner via OSR — On-Stack Replacement inside hot loops).
 
 ### Ignition: The Bytecode Interpreter
 
@@ -115,12 +100,13 @@ the main thread.
 
 **When TurboFan kicks in:**
 
-V8 uses an invocation counter and a backward-branch counter. When a function is called enough
-times (or a loop iterates enough), V8 marks it "hot" and schedules TurboFan compilation. The
-exact thresholds are internal and version-dependent, but roughly:
-- ~1000 invocations or loop iterations for Ignition to gather enough feedback
-- TurboFan compiles on a background thread
-- When compilation finishes, the next call to the function uses the optimized code
+V8 uses an invocation counter and a backward-branch counter. Hot functions tier up through
+Sparkplug → Maglev → TurboFan. Exact thresholds are internal and version-dependent, but roughly:
+- **Sparkplug**: immediate baseline JIT on first run for hot functions (no tier-up threshold).
+- **Maglev**: ~300–500 invocations.
+- **TurboFan**: ~10,000 invocations (or sooner via OSR — on-stack replacement inside hot loops).
+- TurboFan and Maglev both compile on background threads.
+- When compilation finishes, the next call to the function uses the optimized code.
 
 ### Deoptimization (Bailouts)
 
@@ -455,35 +441,32 @@ most objects die young.
 ### Heap Layout
 
 ```
-V8 Heap Structure
-─────────────────
+V8 Heap Structure (modern V8)
+─────────────────────────────
 
 ┌─────────────────────────────────────────────────────────────────────┐
 │                          V8 Heap                                    │
 │                                                                     │
 │  ┌──────────────────────────────┐  ┌──────────────────────────────┐ │
-│  │      Young Generation        │  │      Old Generation          │ │
-│  │      (1-8 MB default)        │  │      (up to --max-old-space) │ │
-│  │                              │  │                              │ │
-│  │  ┌──────────┐ ┌──────────┐  │  │  ┌──────────────────────┐   │ │
-│  │  │   From   │ │    To    │  │  │  │    Old Pointer Space │   │ │
-│  │  │  (Semi-  │ │  (Semi-  │  │  │  │  (objects with refs) │   │ │
-│  │  │  space)  │ │  space)  │  │  │  └──────────────────────┘   │ │
-│  │  │          │ │          │  │  │  ┌──────────────────────┐   │ │
-│  │  │ [active] │ │ [empty]  │  │  │  │    Old Data Space    │   │ │
-│  │  └──────────┘ └──────────┘  │  │  │  (no outgoing refs)  │   │ │
-│  │                              │  │  └──────────────────────┘   │ │
-│  └──────────────────────────────┘  │  ┌──────────────────────┐   │ │
-│                                     │  │   Large Object Space │   │ │
-│  ┌──────────────────────────────┐  │  │  (objects > kMaxReg) │   │ │
-│  │       Other Spaces           │  │  └──────────────────────┘   │ │
-│  │  ┌────────────────────────┐  │  │  ┌──────────────────────┐   │ │
-│  │  │    Code Space          │  │  │  │     Map Space        │   │ │
-│  │  │  (compiled code)       │  │  │  │  (hidden classes)    │   │ │
-│  │  └────────────────────────┘  │  │  └──────────────────────┘   │ │
-│  └──────────────────────────────┘  └──────────────────────────────┘ │
+│  │   Young Generation           │  │   Old Space                  │ │
+│  │   ("new space": 2 semi-      │  │   (unified — previously       │ │
+│  │    spaces, 1-8 MB default)   │  │    "Old Pointer" + "Old Data" │ │
+│  │                              │  │    merged in V8 4.7 / 2016;   │ │
+│  │  ┌──────────┐ ┌──────────┐  │  │    "Map Space" merged into   │ │
+│  │  │   From   │ │    To    │  │  │    Old Space in V8 11.x)     │ │
+│  │  │ [active] │ │ [empty]  │  │  └──────────────────────────────┘ │
+│  │  └──────────┘ └──────────┘  │                                   │
+│  └──────────────────────────────┘  ┌──────────────────────────────┐ │
+│                                    │   Large Object Space         │ │
+│  ┌──────────────────────────────┐  │   (objects > kMaxRegularSize)│ │
+│  │   Code Space                 │  └──────────────────────────────┘ │
+│  │   (compiled code)            │                                   │
+│  └──────────────────────────────┘  (Deprecated: Map Space —         │
+│                                     merged into Old Space in V8 11) │
 └─────────────────────────────────────────────────────────────────────┘
 ```
+
+> **Historical note**: Older V8 diagrams showed "Old Pointer Space" and "Old Data Space" as separate spaces; they were merged into a single **Old Space** in V8 ~4.7 (2016). "Map Space" (for hidden classes) was merged into Old Space in V8 11.x. Only **Young Generation** (new space, two semi-spaces), **Old Space**, **Large Object Space**, and **Code Space** remain.
 
 ### Young Generation: Scavenge (Minor GC)
 
@@ -626,13 +609,15 @@ GC work that would otherwise cause pauses:
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--max-old-space-size=<MB>` | ~1.5GB (64-bit) | Maximum old generation size |
+| `--max-old-space-size=<MB>` | auto-scaled (see note) | Maximum old generation size |
 | `--max-semi-space-size=<MB>` | 16MB | Size of each semi-space in young gen |
 | `--expose-gc` | off | Exposes `global.gc()` for manual GC triggering |
 | `--trace-gc` | off | Logs GC events with timing and heap sizes |
 | `--trace-gc-verbose` | off | Detailed GC event logging |
 | `--gc-interval=<N>` | off | Force GC every N allocations (testing only) |
 | `--optimize-for-size` | off | Prioritize memory over speed |
+
+> **`--max-old-space-size` default**: Historically ~1.4 GB on 64-bit. **Node 12+** auto-scales based on available system memory. **Node 22+** reads `/proc/meminfo` on Linux to pick a sensible default. Set explicitly in containers where cgroup memory limits may not be visible to Node.
 
 ```bash
 # Example: Production Node.js process with 4GB heap and GC logging
@@ -1544,8 +1529,9 @@ class AppEvent {
 ### JSON Performance
 
 ```javascript
-// JSON.parse() is surprisingly fast in V8 — often faster than JS object literals
-// for large objects. V8 has a fast path for JSON parsing.
+// V8 added a faster JSON parser (2024) with SIMD optimizations. Performance vs
+// hand-constructed object literals depends heavily on size and shape — don't
+// assume JSON.parse is always faster; benchmark your specific payload.
 
 // But for very large payloads, consider alternatives:
 // 1. Streaming JSON parser for large files
@@ -1616,7 +1602,10 @@ const clone = structuredClone(original);
 function generateRange(n: number): number[] {
   const arr = [];
   for (let i = 0; i < n; i++) {
-    arr.push(i);  // Internal array resizes at 4, 8, 16, 32, 64, 128, ...
+    arr.push(i);
+    // V8 grows internal backing stores by ~1.5x (not 2x) above a threshold.
+    // Small arrays still grow to specific sizes (4, 8, 16), but the
+    // steady-state multiplier is 1.5.
   }
   return arr;
 }

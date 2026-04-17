@@ -20,6 +20,12 @@ Hash table mapping key → row pointer.
 - **Does NOT support**: Range queries, sorting
 - **Pros**: O(1) lookups
 - **Use case**: Exact match lookups (session IDs, cache keys)
+- **PostgreSQL note**: Hash indexes became crash-safe + WAL-logged in v10 (2017). Previously unsafe — historical advice to avoid them is outdated.
+
+### GIN / GiST (PostgreSQL)
+- **GIN** (Generalized Inverted Index) — PostgreSQL-only, optimized for composite values: JSONB, arrays, full-text tsvector.
+- **GiST** (Generalized Search Tree) — balanced tree framework supporting custom ops (ranges, geometry, full-text, pg_trgm).
+- Use **GIN** for read-heavy FTS/JSONB; **GiST** for nearest-neighbor/range queries.
 
 ### LSM Tree (Log-Structured Merge Tree)
 Used by write-optimized databases (Cassandra, RocksDB, LevelDB). Writes go to an in-memory memtable, then flush to sorted SSTables on disk. Background compaction merges SSTables.
@@ -60,6 +66,11 @@ SELECT created_at, amount FROM orders WHERE user_id = 123;
 | Data order | Table rows physically sorted by the index key | Separate structure pointing to rows |
 | Count per table | One (usually primary key) | Many |
 | Lookup | Direct (data is in the index) | Extra hop (index → row pointer → data) |
+
+**Per-engine nuance**:
+- **InnoDB** — PK is always clustered.
+- **SQL Server** — one clustered index per table, your choice.
+- **PostgreSQL** — no true clustered index; `CLUSTER` is a one-time reorg.
 
 ## The Write Penalty
 Every index must be updated on INSERT, UPDATE, DELETE. More indexes = slower writes. This is the fundamental trade-off.

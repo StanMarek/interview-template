@@ -118,7 +118,7 @@ Augmented BST keyed on interval start; each node stores max end in its subtree. 
 
 | Algorithm      | Best     | Average  | Worst    | Space   | Stable | In-place |
 |----------------|----------|----------|----------|---------|--------|----------|
-| Quick Sort     | O(n lg n)| O(n lg n)| O(n²)    | O(lg n) | No     | Yes      |
+| Quick Sort     | O(n lg n)| O(n lg n)| O(n²)    | O(log n) avg / O(n) worst | No     | Yes      |
 | Merge Sort     | O(n lg n)| O(n lg n)| O(n lg n)| O(n)    | Yes    | No       |
 | Heap Sort      | O(n lg n)| O(n lg n)| O(n lg n)| O(1)    | No     | Yes      |
 | Insertion Sort | O(n)     | O(n²)    | O(n²)    | O(1)    | Yes    | Yes      |

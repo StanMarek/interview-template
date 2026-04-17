@@ -47,6 +47,8 @@ Each layer serves a different purpose. In interviews, you'll most commonly discu
 | **FIFO** | Evicts the oldest item | Simple, order matters |
 | **TTL-based** | Evicts after a time-to-live expires | All items have a natural expiration |
 | **Random** | Evicts a random item | Surprisingly effective, very simple |
+| **ARC** (Adaptive Replacement Cache, ZFS) | Self-tuning between recency and frequency | Workloads with shifting access patterns |
+| **W-TinyLFU** (Caffeine library) | Modern hit-ratio leader; sketch-based frequency estimation + small window cache for recency | Preferred over plain LRU in JVM applications |
 
 ## Cache Invalidation
 This is the hardest problem in caching ("There are only two hard things in computer science: cache invalidation and naming things.").

@@ -115,8 +115,10 @@ Both transactions saw a valid state and wrote to different rows, but the combine
 | Read Uncommitted   | yes        | yes                 | yes          | yes        | —                      |
 | Read Committed     | no         | yes                 | yes          | yes        | Postgres default       |
 | Repeatable Read    | no         | no                  | yes (SQL std) / no (Postgres/InnoDB via MVCC) | yes | MySQL InnoDB default |
-| Snapshot Isolation | no         | no                  | no           | **yes**    | Oracle, SQL Server RCSI |
+| Snapshot Isolation (SI) | no     | no                  | no           | **yes**    | Oracle (default), SQL Server (via `SET TRANSACTION ISOLATION LEVEL SNAPSHOT` + `ALLOW_SNAPSHOT_ISOLATION ON`) |
 | Serializable       | no         | no                  | no           | no         | CockroachDB default    |
+
+> **Read Committed Snapshot Isolation (RCSI)** is a SQL Server-specific variant — it is Read Committed semantics with snapshot-based non-locking reads, NOT full SI.
 
 ## Concrete Design Examples
 

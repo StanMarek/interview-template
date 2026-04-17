@@ -305,6 +305,20 @@ async function* generateNumbers() {
 const fromIterable = ReadableStream.from(generateNumbers());
 ```
 
+> **Symmetric conversion:** `Readable.from(asyncIterable)` (Node 12.3+) and `ReadableStream.from()` (Node 20+) provide symmetric conversion between async iterables and streams. Pair with `Readable.toWeb()` / `Readable.fromWeb()` to bridge Node streams and WHATWG streams in either direction.
+
+### Streaming Request Bodies with fetch — `duplex: 'half'`
+
+Streaming request bodies via `fetch(url, { body: readableStream, duplex: 'half' })` landed in Node 18+. The `duplex: 'half'` option is required whenever `body` is a `ReadableStream`; without it Node throws. `'half'` means the client finishes sending its body before it starts reading the response (true full-duplex HTTP is not yet supported). Use this to upload large files without buffering, or to pipe server-to-server transforms.
+
+```typescript
+const upload = await fetch('https://api.example.com/ingest', {
+  method: 'POST',
+  body: createReadStream('huge.ndjson'),   // Node Readable — auto-adapted
+  duplex: 'half',                          // REQUIRED with a streaming body
+});
+```
+
 ### Teeing Streams
 
 Teeing creates two independent branches from a single ReadableStream. Each branch receives all the data independently.
@@ -1168,7 +1182,7 @@ export class NotificationController {
 | **Resume** | Built-in via `Last-Event-ID` | Not built-in |
 | **Data format** | Text only (JSON as string) | Text and binary |
 | **Browser API** | `EventSource` (simple) | `WebSocket` (more complex) |
-| **HTTP/2 multiplexing** | Yes (shares connection) | No (separate TCP per socket) |
+| **HTTP/2 multiplexing** | Yes (shares connection) | WebSockets over HTTP/2 (RFC 8441) is specified but not widely deployed. Node 22 has experimental WS-over-HTTP/2. Most production deployments still use HTTP/1.1 Upgrade (separate TCP per socket). |
 | **Proxy/firewall** | Works through HTTP proxies | May be blocked by corporate proxies |
 | **Max connections** | Browser limit: 6 per domain (HTTP/1.1) | No browser limit |
 | **Compression** | Standard HTTP compression | permessage-deflate (complex) |
@@ -1661,9 +1675,14 @@ Processing a 10 GB JSON file without loading it into memory:
 ```typescript
 import { pipeline } from 'stream/promises';
 import { createReadStream } from 'fs';
-import { parser } from 'stream-json';
-import { streamArray } from 'stream-json/streamers/StreamArray';
-import { pick } from 'stream-json/filters/Pick';
+// stream-json exports a factory; the package entry does not expose a named `parser` binding.
+// ESM:     import parser from 'stream-json/Parser.js';
+// CJS:     const { parser } = require('stream-json');
+import parser from 'stream-json/Parser.js';
+import StreamArray from 'stream-json/streamers/StreamArray.js';
+import Pick from 'stream-json/filters/Pick.js';
+const { streamArray } = StreamArray;
+const { pick } = Pick;
 import { Transform, TransformCallback } from 'stream';
 
 // stream-json parses JSON incrementally without loading entire file

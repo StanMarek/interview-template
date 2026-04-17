@@ -118,6 +118,8 @@ RSA-SHA256(base64UrlEncode(header) + "." + base64UrlEncode(payload), privateKey)
 
 ### JWT Implementation in Node.js
 
+> **Library recommendation:** Prefer `jose` (by panva) — actively maintained, supports JWE, JWK rotation, and Edge runtimes. `jsonwebtoken` is still widely used but has slower security response. The example below uses `jsonwebtoken` because it is the most recognisable API in interviews; translate to `jose` in production (`SignJWT`, `jwtVerify`, `createRemoteJWKSet`).
+
 ```typescript
 import jwt, { JwtPayload } from "jsonwebtoken";
 import { readFileSync } from "node:fs";
@@ -681,7 +683,7 @@ CSRF tricks a user's browser into making requests to a site where they are alrea
 
 **Prevention — CSRF tokens + SameSite cookies:**
 
-> ⚠️ **`csurf` is deprecated and archived** (unmaintained since 2022, no security patches). Do **not** use it in new code. Production-ready alternatives: **`csrf-csrf`** (double-submit cookie, actively maintained), **`@nestjs/csrf` / `@fastify/csrf-protection`** for framework-specific use. The `csurf` example below is kept for historical reference only — the token-workflow concepts are identical across libraries.
+> ⚠️ **`csurf` is deprecated and archived** (unmaintained since 2022, no security patches). Do **not** use it in new code. Production-ready alternatives: **`csrf-csrf`** (double-submit cookie, actively maintained) or **`@fastify/csrf-protection`** under the Fastify adapter. **Nest.js CSRF: there is no official `@nestjs/csrf`.** Use `csurf` (deprecated, session-based) or `csrf-csrf` (double-submit) as Express middleware, or `@fastify/csrf-protection` under the Fastify adapter. The `csurf` example below is kept for historical reference only — the token-workflow concepts are identical across libraries.
 
 ```typescript
 // ⚠️ csurf is archived; prefer csrf-csrf in new projects. API is nearly identical.
@@ -881,6 +883,39 @@ app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
     res.status(500).json({ error: err.message, stack: err.stack });
   }
 });
+```
+
+### Prototype Pollution
+
+Node-specific vuln class. Use `Object.create(null)` for maps; freeze `Object.prototype` in hostile environments; avoid deep-merge libs without key validation.
+
+Prototype pollution occurs when untrusted input mutates `Object.prototype` via keys like `__proto__`, `constructor.prototype`, or via vulnerable deep-merge/clone helpers. Because every object inherits from `Object.prototype`, a polluted property becomes globally observable — leading to DoS, auth bypass, or RCE when a prototype key collides with runtime sentinel checks.
+
+```typescript
+// VULNERABLE: naive deep merge accepts __proto__
+function merge(target: any, source: any) {
+  for (const key in source) {
+    if (typeof source[key] === "object") merge(target[key] ?? (target[key] = {}), source[key]);
+    else target[key] = source[key];
+  }
+}
+// Attacker payload: { "__proto__": { "isAdmin": true } }
+// After merge: ({}).isAdmin === true globally
+
+// SAFER:
+const safeMap = Object.create(null); // no prototype chain, no pollution surface
+// Or explicitly reject dangerous keys in validators; prefer libraries like `lodash.merge` >=4.17.21 or `deepmerge` that block __proto__/constructor.
+```
+
+### Node Permission Model
+
+Node 20+ ships an experimental `--permission` flag with `--allow-fs-read`, `--allow-fs-write`, `--allow-net`, `--allow-child-process`. Still experimental in 22/24. Complements sandboxing (container/VM) rather than replacing it; addons (`node:worker_threads`, native modules) can bypass. Useful defense-in-depth for plugin hosts and CLI tools running untrusted JS.
+
+```bash
+node --experimental-permission \
+     --allow-fs-read=./data \
+     --allow-net=api.example.com \
+     app.js
 ```
 
 ---
@@ -1542,6 +1577,10 @@ npm config set save-exact true
 npm audit signatures  # Verify that packages have valid registry signatures
 ```
 
+### npm Provenance / Sigstore Attestations
+
+`npm publish --provenance` creates a sigstore attestation tied to the source repo. Verify with `npm audit signatures`. SLSA Build L2 by default. Generally available since npm 9.5 (2023) when run from a supported CI provider (GitHub Actions, GitLab CI). The attestation links a published tarball to the exact commit, workflow, and builder that produced it — making supply-chain compromise via stolen publish tokens detectable.
+
 ### Package Manager Security Comparison
 
 | Feature | npm | yarn (v3/berry) | pnpm |
@@ -1801,7 +1840,7 @@ import crypto from "node:crypto";
 // Cryptographically secure random bytes
 const randomBytes = crypto.randomBytes(32); // 256-bit random value
 
-// UUID v4 (built into Node.js 19+)
+// UUID v4 (built into Node.js 14.17+ / 16+)
 const uuid = crypto.randomUUID(); // "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d"
 
 // Random token for email verification, password reset, etc.

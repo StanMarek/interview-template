@@ -14,7 +14,7 @@ Without a gateway, clients must know about and communicate with every microservi
 | **Authentication & Authorization** | Validate JWT/OAuth tokens before requests reach services |
 | **Rate Limiting** | Prevent abuse per client/API key |
 | **Load Balancing** | Distribute requests across service instances |
-| **Protocol Translation** | REST ↔ gRPC, HTTP ↔ WebSocket |
+| **Protocol Translation** | REST ↔ gRPC, HTTP ↔ WebSocket (note: AWS API Gateway does NOT natively support gRPC. Kong has a gRPC-gateway plugin. Envoy and Istio IngressGateway are the typical REST↔gRPC translators in production.) |
 | **Response Aggregation** | Combine multiple service responses into one client response |
 | **Caching** | Cache common responses at the edge |
 | **Request/Response Transformation** | Modify headers, body, query params |

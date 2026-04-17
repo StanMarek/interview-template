@@ -708,7 +708,8 @@ ac.abort();
 ### Typed Event Emitters in TypeScript
 
 ```typescript
-// Node.js 20+ supports generic EventEmitter for type safety
+// Typed EventEmitter is a TypeScript-only feature via `@types/node` (not a runtime change).
+// `EventEmitter` remains non-generic at runtime.
 import { EventEmitter } from "events";
 
 // Define event map: event name → argument tuple
@@ -1194,6 +1195,8 @@ if (!cluster.isPrimary) {
 
 ## 6. Concurrency Control Patterns
 
+> **Note on structured concurrency**: Node has no native structured concurrency primitive. Use user-land libs like `p-limit`, `p-map`, `p-queue`, or `async-pool` for bounded concurrency.
+
 ### Semaphore Pattern
 
 A semaphore limits the number of concurrent async operations. JavaScript does not have built-in semaphores, but the pattern is straightforward with promises:
@@ -1483,6 +1486,8 @@ await Promise.all([withdraw(50), withdraw(50)]);
 ```
 
 ### AsyncLocalStorage for Request Context
+
+> **Performance note**: Early versions had measurable overhead. Node 20+ uses `AsyncContextFrame` internally — overhead is typically <5% for most workloads.
 
 ```typescript
 import { AsyncLocalStorage } from "async_hooks";
@@ -1866,11 +1871,13 @@ controller.abort();                      // reason: AbortError
 controller.abort("custom reason");       // reason: "custom reason"
 controller.abort(new Error("timeout"));  // reason: Error("timeout")
 
-// Static factory methods (Node 20+ / ES2024)
+// Static factory methods — version notes:
+//   AbortSignal.timeout(): Node 17.3+
+//   AbortSignal.any():     Node 20.3+
 const timeoutSignal = AbortSignal.timeout(5000); // auto-aborts after 5s
 const alreadyAborted = AbortSignal.abort("reason"); // already aborted
 
-// Combine multiple signals — aborts when ANY source aborts
+// Combine multiple signals — aborts when ANY source aborts (Node 20.3+)
 const combined = AbortSignal.any([
   AbortSignal.timeout(5000),
   userCancelController.signal,
@@ -2107,7 +2114,7 @@ await pipeline(readable, transform, writable, { signal });
 |-----|-------------------------|-------------------|
 | `fetch()` | Node 18 | Rejects with AbortError |
 | `fs/promises.*` | Node 16 | Rejects with AbortError |
-| `timers/promises.setTimeout` | Node 16 | Resolves immediately (no error) or rejects |
+| `timers/promises.setTimeout` | Node 16 | Rejects with `AbortError` when signal aborts (does NOT resolve silently) |
 | `events.once()` | Node 16 | Rejects with AbortError |
 | `events.on()` | Node 16 | Async iterator returns |
 | `child_process.*` | Node 16 | Sends SIGTERM to child |
@@ -2232,7 +2239,7 @@ Cancellation hierarchy:
 ### Execution Order Rules
 
 1. **Synchronous code** runs first — the entire call stack is emptied
-2. **Microtasks** run next — Promise callbacks, `queueMicrotask()`, `process.nextTick()` (Node.js only, even higher priority than Promise microtasks)
+2. **Microtasks** run next — Promise callbacks, `queueMicrotask()`. Note: `process.nextTick()` is **not a microtask** per spec. It has its own queue, drained BEFORE the microtask (promises) queue after each phase callback.
 3. **Macrotasks** run one at a time — `setTimeout`, `setInterval`, `setImmediate`, I/O callbacks
 4. After each macrotask, the microtask queue is fully drained again
 

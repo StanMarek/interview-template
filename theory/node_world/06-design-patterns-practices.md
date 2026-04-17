@@ -353,7 +353,11 @@ async function register(email: string, pw: string): Promise<Result<User, RegErro
 }
 ```
 
-Libraries: **neverthrow**, **ts-results** provide `map`, `flatMap`, `match` for railway-oriented programming.
+Libraries: `neverthrow` is the current standard; `ts-results` is largely unmaintained. For serious functional programming consider `effect` (Effect-TS) or `fp-ts`. These provide `map`, `flatMap`, `match` for railway-oriented programming.
+
+### Prototype Pollution
+
+Prototype pollution (`obj.__proto__.polluted = 'x'`) — use `Object.create(null)` for maps; freeze prototypes with `Object.freeze(Object.prototype)` in hostile environments; validate object keys before deep-merge.
 
 ### Discriminated Unions + Exhaustive Switch
 
@@ -438,7 +442,7 @@ abstract class AppError extends Error {
   abstract readonly statusCode: number;
   abstract readonly code: string;
   readonly isOperational = true;
-  constructor(msg: string, public readonly cause?: Error) { super(msg); this.name = this.constructor.name; }
+  constructor(msg: string, public readonly cause?: Error) { super(msg, { cause }); this.name = this.constructor.name; } // Node 16.9+ Error cause support preserves the cause chain
   toJSON() { return { code: this.code, message: this.message }; }
 }
 

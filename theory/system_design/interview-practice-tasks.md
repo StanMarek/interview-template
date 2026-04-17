@@ -966,7 +966,7 @@ Each links to a worked solution in `/diagrams/reliability`. These hit the hardes
 **Scoring rubric** — R1 + R2 + R3 + R4.
 
 **Twist cards**
-- "Promise 11 9s of durability — how?"
+- "Promise 11 9s of durability — how?" (S3 advertises **eleven 9s of durability** (99.999999999%) as a **design target**, not an SLA. Availability SLA is 99.9% (Standard) or 99.99% (Standard-IA).)
 - "List operation on a bucket with 1B objects."
 - "Delete an object — strong vs eventual delete visibility."
 - "Cross-region replication with RPO <15 min."

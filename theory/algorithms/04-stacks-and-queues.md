@@ -54,7 +54,8 @@ PriorityQueue<Integer> minHeap = new PriorityQueue<>();
 PriorityQueue<Integer> maxHeap = new PriorityQueue<>(Comparator.reverseOrder());
 
 // Custom comparator
-PriorityQueue<int[]> pq = new PriorityQueue<>((a, b) -> a[1] - b[1]);
+// Use Integer.compare — subtraction comparators overflow on extreme values.
+PriorityQueue<int[]> pq = new PriorityQueue<>((a, b) -> Integer.compare(a[1], b[1]));
 
 minHeap.offer(3);       // O(log n)
 minHeap.poll();         // O(log n) — removes min
@@ -104,9 +105,10 @@ public int[] nextGreaterElement(int[] nums) {
 public boolean isValid(String s) {
     Deque<Character> stack = new ArrayDeque<>();
     Map<Character, Character> map = Map.of(')', '(', ']', '[', '}', '{');
+    Set<Character> openers = Set.of('(', '[', '{');
 
     for (char c : s.toCharArray()) {
-        if (map.containsValue(c)) {
+        if (openers.contains(c)) {
             stack.push(c);
         } else if (map.containsKey(c)) {
             if (stack.isEmpty() || !stack.pop().equals(map.get(c))) return false; // .equals, not !=

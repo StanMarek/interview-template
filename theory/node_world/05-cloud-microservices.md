@@ -24,7 +24,7 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./
 ENV NODE_OPTIONS="--max-old-space-size=384"
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
-  CMD wget -qO- http://localhost:3000/health || exit 1
+  CMD node -e "require('http').get('http://localhost:3000/health', r => process.exit(r.statusCode === 200 ? 0 : 1))"
 USER app
 EXPOSE 3000
 CMD ["node", "dist/main.js"]
@@ -117,6 +117,7 @@ containers:
 ```typescript
 // Liveness: process alive? Readiness: dependencies healthy?
 app.get("/health/live", (_req, res) => res.json({ status: "alive" }));
+// NOTE: A proper liveness probe for Node should also check event-loop health (e.g., via `perf_hooks.monitorEventLoopDelay`) — a deadlocked event loop will otherwise pass this check.
 app.get("/health/ready", async (_req, res) => {
   try {
     await pool.query("SELECT 1");
@@ -203,6 +204,10 @@ Warm Start:  Handler only   (~1-50ms overhead)
 | ESBuild single-file bundle | Faster download + parse | Build step |
 | Lazy DB initialization | Defer to first request | First-request latency |
 | Smaller dependencies | Faster cold start | May limit library choice |
+
+arm64 (Graviton2/3) runtimes give ~20% better price/perf. ESM bundling with esbuild + `bundleAwsSDK: true` helps Node cold starts. **Lambda SnapStart for Node 22 is GA (2025).**
+
+As of Aug 1, 2025, AWS bills the Lambda INIT phase — cold start cost is now explicit, not hidden in the first invocation.
 
 ### Lambda vs Long-Running Server
 
@@ -429,7 +434,7 @@ import { Kafka } from "kafkajs";
 
 const kafka = new Kafka({ brokers: ["kafka:9092"], clientId: "order-svc" });
 
-// Producer (idempotent for exactly-once semantics)
+// Producer: `idempotent: true` gives **idempotent producer** semantics (no duplicates on retries within the same partition session). Exactly-once end-to-end requires transactional producer + transactional consumer with `isolation.level: read_committed`.
 const producer = kafka.producer({ idempotent: true });
 await producer.send({
   topic: "order-events",

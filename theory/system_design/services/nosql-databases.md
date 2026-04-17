@@ -18,13 +18,17 @@ Simplest model: a hashmap. Lookup by key, get a value (opaque blob).
 **Best for**: Session stores, caching, shopping carts, user preferences, feature flags.
 **Access pattern**: `GET(key)`, `PUT(key, value)`. No queries on values.
 
+#### DynamoDB Modeling
+**Partition key (hash key)** — determines physical partition; must have high cardinality. **Sort key** (optional) — enables range queries within partition. **LSI** (Local Secondary Index) — alternate sort key, same partition key, 10 per table, strong consistency available. **GSI** (Global Secondary Index) — different partition/sort keys, eventually consistent, 20 per table. Single-table design is idiomatic.
+
 ### 2. Document Stores
 Store semi-structured documents (JSON/BSON). Documents can have nested structures and varying schemas.
 
 | Database | Notes |
 |----------|-------|
-| MongoDB | Most popular, rich query language, aggregation pipeline. MongoDB 7 (2023) added queryable encryption; MongoDB 8 (Oct 2024) brought time-series/vector improvements and ~30% throughput gains. Relicensed from AGPL to SSPL in 2018 — still not OSI-approved. |
+| MongoDB | Most popular, rich query language, aggregation pipeline. Queryable Encryption preview in 6.0 (2022); equality queries GA in 7.0 (Aug 2023); range queries GA in 8.0 (2024). MongoDB 8 (Oct 2024) brought time-series/vector improvements and ~30% throughput gains. Relicensed from AGPL to SSPL in 2018 — still not OSI-approved. |
 | CouchDB | AP, multi-master replication, HTTP/REST API |
+| Couchbase | Memory-first document DB with SQL++ (N1QL) query language, integrated full-text search, Eventing, Analytics. XDCR for cross-data-center replication. |
 | Firestore | Managed, real-time sync, mobile-first |
 | Elasticsearch / OpenSearch | Document store + full-text search (see Search Engines) |
 

@@ -11,7 +11,7 @@ Since network partitions are inevitable in distributed systems, the real choice 
 
 ### CP Systems
 During partition, reject requests to partitioned nodes to maintain consistency.
-- Examples: HBase, MongoDB (default since 4.0), ZooKeeper, etcd, Spanner, CockroachDB, TiDB
+- Examples: HBase, MongoDB (CP with **majority write concern + linearizable read concern**. Default concerns in 5.0+ are `majority` writes. Default read concern is `local` — explicit `linearizable` needed for strict linearizability.), ZooKeeper, etcd, Spanner, CockroachDB, TiDB
 - Use when: Banking, inventory, anything where stale reads are dangerous
 
 ### AP Systems

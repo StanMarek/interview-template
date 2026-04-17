@@ -52,7 +52,7 @@ Indexes, query plan analysis (EXPLAIN), denormalization, materialized views.
 | **CockroachDB** | Distributed SQL, horizontal scaling, strong consistency | NewSQL: SQL interface + distributed architecture. Relicensed to CockroachDB Software License (CSL, source-available) in 2024. |
 | **TiDB** | MySQL-compatible, distributed, HTAP | NewSQL |
 | **Vitess** | MySQL sharding middleware | Used by YouTube, PlanetScale |
-| **Amazon Aurora** | Cloud-native MySQL/PostgreSQL, separated storage | 5x throughput of standard MySQL. Aurora DSQL (2024): active-active multi-region Postgres. |
+| **Amazon Aurora** | Cloud-native MySQL/PostgreSQL, separated storage | 5x throughput of standard MySQL. Aurora DSQL — **preview at re:Invent Dec 2024**, **GA May 2025**. Active-active multi-region PostgreSQL-compatible with low-latency global consistency. |
 | **Neon / Supabase** | Serverless Postgres with branching / BaaS | Modern Postgres-based platforms with copy-on-write branching. |
 
 ## Postgres Ecosystem Notes
@@ -64,6 +64,8 @@ Indexes, query plan analysis (EXPLAIN), denormalization, materialized views.
 ## NewSQL
 Databases that provide the scalability of NoSQL with the ACID guarantees of SQL. They use distributed consensus (Raft/Paxos) and distributed storage.
 - Examples: CockroachDB, Google Spanner, TiDB, YugabyteDB
+- **Spanner** uses TrueTime API (atomic clocks + GPS at each DC) for external consistency (linearizability) at global scale. Commit waits bounded by clock uncertainty (~7ms typical).
+- **YugabyteDB** — YSQL (PostgreSQL-compatible wire protocol) and YCQL (Cassandra-compatible) on shared distributed storage (Raft-replicated tablets).
 
 ## When to Use SQL
 - Data has clear relationships (joins are common)

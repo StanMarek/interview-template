@@ -51,6 +51,9 @@ It's not binary. There's a spectrum: Monolith → Modular Monolith → Macroserv
 | Organization | Single team | Multiple teams needing autonomy |
 | Stage | Startup/MVP | Growth/scale phase |
 
+## Conway's Law
+**Conway's Law** (Melvin Conway, 1967): "Organizations design systems that mirror their communication structures." Microservice boundaries should align with team boundaries — the **Inverse Conway Maneuver** reorganizes teams to match desired architecture.
+
 ## Decomposition Strategies
 
 ### By Business Domain (Bounded Context)
@@ -67,7 +70,7 @@ Gradually replace monolith components with microservices. New features go to mic
 
 ### Synchronous (Request/Response)
 - **REST (JSON over HTTP/1.1 or HTTP/2)**: Simple, human-readable, browser-friendly, easy to debug. Default for public-facing APIs.
-- **gRPC (Protobuf over HTTP/2)**: Binary, 5-10× faster on the wire, native streaming (server, client, bidirectional), code-generated stubs. Default for **internal service-to-service** traffic in 2025-2026. Downside: not natively browser-compatible (needs gRPC-Web + proxy).
+- **gRPC (Protobuf over HTTP/2)**: Binary, typically 2-10× faster than JSON-over-HTTP/1.1 (protobuf is more compact; HTTP/2 multiplexes). Exact gain depends on payload size and serialization cost. Native streaming (server, client, bidirectional), code-generated stubs. Default for **internal service-to-service** traffic in 2025-2026. Downside: not natively browser-compatible (needs gRPC-Web + proxy).
 - **GraphQL**: Client specifies exactly what data it needs; reduces over-fetching. Best for BFF/aggregation layers with heterogeneous clients. Added complexity: N+1 queries, caching, schema governance.
 - **tRPC / OpenAPI-typed clients**: End-to-end type safety without the complexity of gRPC, popular in TypeScript monorepos.
 

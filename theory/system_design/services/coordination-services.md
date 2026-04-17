@@ -16,8 +16,8 @@ Distributed coordination services that provide primitives for building reliable 
 - **Ephemeral znodes**: Exist only while the session is active. Auto-deleted when the client disconnects. Used for leader election and service discovery.
 - **Sequential znodes**: Automatically appended with a monotonically increasing number. Used for distributed locking (lowest sequence number holds the lock).
 - **Watches**: Client registers a one-time trigger on a znode. Notified when data changes.
-- **Consistency**: Linearizable writes (all go through the leader). Sequential reads (reads may be stale unless using `sync`).
-- **Consensus**: ZAB (ZooKeeper Atomic Broadcast) — similar to Raft.
+- **Consistency**: Reads are **sequentially consistent** (FIFO client order), not linearizable. Writes are linearizable. Use `sync()` to force a read barrier for fresh data.
+- **Consensus**: **Zab** (ZooKeeper Atomic Broadcast) — predates Raft. Epoch-based primary-order broadcast. Conceptually closer to Multi-Paxos than Raft.
 - **Quorum**: 2F+1 nodes tolerate F failures (3 nodes tolerate 1, 5 tolerate 2).
 - **Used by**: HBase, Hadoop, Solr, ClickHouse. (Kafka removed ZooKeeper in 4.0 — replaced by KRaft.)
 
@@ -27,7 +27,7 @@ Distributed coordination services that provide primitives for building reliable 
 - **Watch**: Efficient streaming watch API (long-lived gRPC stream)
 - **Lease**: TTL-based keys. If lease expires, key is deleted. Used for service registration and leader election.
 - **Transactions**: Multi-key atomic compare-and-swap
-- **Current version**: etcd v3.5 (LTS) and v3.6 (2024+, downgrade support, better memory management, feature gates). v2 API was removed in v3.6.
+- **Current version**: etcd v3.5 (LTS) and **etcd 3.6** (May 2025) — ongoing v2 API/store removal; CLI-only use.
 - **Used by**: Kubernetes (backing store for all cluster state), CoreDNS
 
 ## Consul
@@ -55,7 +55,7 @@ Distributed coordination services that provide primitives for building reliable 
 ## When to Use
 - **ZooKeeper**: You're in the Hadoop/HBase/Solr ecosystem and need battle-tested coordination (Kafka no longer uses it as of 4.0)
 - **etcd**: You're using Kubernetes, or need a simple, reliable KV with strong consistency
-- **Consul**: You need service discovery + health checks + KV + service mesh in one tool. Note: HashiCorp relicensed Consul to BSL in 2023 — OpenTofu-style forks have not taken off, but check licensing for commercial use.
+- **Consul**: You need service discovery + health checks + KV + service mesh in one tool. Note: HashiCorp relicensed Consul + Vault + Terraform to BSL in 2023. **OpenTofu** forked Terraform. **OpenBao** forked Vault. No major Consul fork has emerged.
 
 ## Possible Interview Questions
 1. "How would you implement leader election using ZooKeeper?"

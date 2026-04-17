@@ -213,7 +213,7 @@ Between EVERY phase transition:
 **Microtasks** (higher priority):
 - `Promise.then/catch/finally` callbacks
 - `queueMicrotask()` callbacks
-- `process.nextTick()` callbacks (even higher priority — separate queue drained first)
+- `process.nextTick()` has its **own queue** (not the microtask queue), drained BEFORE promise microtasks after each phase callback. Technically not a microtask per spec.
 
 **Macrotasks** (lower priority — one per event loop iteration phase):
 - `setTimeout()`, `setInterval()`
@@ -1261,7 +1261,7 @@ const mem = process.memoryUsage();
 //   heapTotal: 7_000_000,   ← V8 heap allocated
 //   heapUsed: 5_000_000,    ← V8 heap actually used
 //   external: 1_000_000,    ← C++ objects bound to JS (Buffers)
-//   arrayBuffers: 500_000   ← SharedArrayBuffer + ArrayBuffer
+//   arrayBuffers: 500_000   ← SharedArrayBuffer + ArrayBuffer (SUBSET of external — included, not counted separately)
 // }
 
 // High-resolution time (for benchmarking)
@@ -1554,7 +1554,7 @@ async function pollWithCancellation(
 
 ### `node:test` — Built-in Test Runner
 
-Since Node.js 18, there is a built-in test runner that requires no external dependencies:
+Experimental since Node.js 18; stable since Node 20. The built-in test runner requires no external dependencies:
 
 ```typescript
 import { describe, it, beforeEach, mock } from "node:test";

@@ -12,7 +12,7 @@ Publish/Subscribe (Pub/Sub) is a messaging pattern where publishers send message
 | Use case | Event notification, broadcasting | Task processing, work distribution |
 | Example | "Order placed" → notify 5 services | "Process image" → one worker picks it up |
 
-Many systems combine both: Kafka consumer groups are Pub/Sub (between groups) + Queue (within a group).
+Many systems combine both: Kafka's model is pub/sub **per consumer group** — multiple groups each receive all messages (pub/sub between groups); within a group, messages are load-balanced across consumers (queue within group).
 
 ## Core Components
 - **Publisher**: Produces messages, knows nothing about subscribers
@@ -51,6 +51,8 @@ Each subscriber has a filter. Only receives matching messages.
 - **Global ordering**: All subscribers see messages in the same order. Limits throughput.
 - **Partition ordering**: Messages with the same key (e.g., user_id) are ordered. Different keys can be parallel.
 - **No ordering**: Maximum throughput. Subscribers handle out-of-order.
+
+**Changing partition count breaks key→partition mapping** — existing keys get rehashed to different partitions, ordering invariant broken. Plan partition count upfront or use semantic partitioning.
 
 ## Backpressure in Pub/Sub
 If a subscriber can't keep up:
