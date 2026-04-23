@@ -36,7 +36,7 @@ Each microservice should align with a **Bounded Context** — a boundary within 
 - **GraphQL**: Client-specified queries, reduces over/under-fetching. Risk: N+1 queries on server, complexity in caching.
 
 **Asynchronous**:
-- **Message Queues** (RabbitMQ, SQS): RabbitMQ supports point-to-point (direct queue) AND pub/sub (fanout/topic/headers exchanges). SQS standard queues are at-least-once; SQS FIFO offers exactly-once processing within a 5-minute dedup window.
+- **Message Queues** (RabbitMQ, SQS): RabbitMQ supports point-to-point (direct queue) AND pub/sub (fanout/topic/headers exchanges). SQS standard queues are at-least-once; SQS FIFO provides ordered delivery plus queue-level deduplication for retries within the 5-minute deduplication window, so consumers should still be idempotent.
 - **Event Streaming** (Kafka, Kinesis): Pub/sub, event log, replay capability.
 - **Event-Driven Architecture**: Services react to events instead of being called directly. Enables loose coupling.
 
@@ -745,7 +745,7 @@ Spring Boot is no longer the only serious choice. **Quarkus** (Red Hat) and **Mi
 
 | Service | Use Case |
 |---------|----------|
-| SQS | Simple message queue, decoupling, exactly-once *processing* within a 5-minute deduplication window (FIFO queues only) |
+| SQS | Simple message queue, decoupling, FIFO queues add ordering plus queue-level deduplication within a 5-minute window |
 | SNS | Fan-out pub/sub notifications |
 | Kinesis | Real-time data streaming, ordered per shard |
 | EventBridge | Event routing with rules/filtering |

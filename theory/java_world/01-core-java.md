@@ -72,7 +72,7 @@ volatile boolean flag = false;
 **ZGC Internals**: Uses colored pointers (metadata stored in pointer bits) and load barriers. Can handle multi-terabyte heaps with <1ms pauses. Concurrent relocation using forwarding tables. **Since Java 24 (JEP 490), ZGC is generational-only** — the non-generational mode was removed.
 
 **Tuning tips**:
-- `-XX:+UseStringDeduplication` (G1 default since 18, available on ZGC) collapses duplicate `String` contents automatically — usually a better option than manual `intern()`.
+- `-XX:+UseStringDeduplication` is **opt-in and G1-only** in current Oracle/OpenJDK docs — useful when heap profiles show many duplicate `String` contents, but do not assume it is enabled by default.
 - Prefer sizing the heap via `-Xmx` and letting the GC ergonomics pick the rest; hand-tuned Young/Old ratios are rarely worth it on G1/ZGC.
 
 ### Class Loading
@@ -194,10 +194,11 @@ User u = CURRENT_USER.get();
 **Structured Concurrency (JEP 505, still preview in Java 25)**: Treats a fan-out of concurrent subtasks as a single unit of work with scoped lifetimes and cancellation.
 
 ```java
-try (var scope = new StructuredTaskScope.ShutdownOnFailure()) {
+try (var scope = StructuredTaskScope.open(
+        StructuredTaskScope.Joiner.<Object>awaitAllSuccessfulOrThrow())) {
     var user   = scope.fork(() -> fetchUser(id));
     var orders = scope.fork(() -> fetchOrders(id));
-    scope.join().throwIfFailed();
+    scope.join();   // fail-fast: cancels sibling subtasks on first failure
     return new Response(user.get(), orders.get());
 }
 ```
@@ -269,7 +270,7 @@ Comparator<Employee> byDeptThenSalary =
 - **Immutable + final** → thread-safe, safely cacheable `hashCode`, and safe to use as `Map` keys.
 - **Compact Strings (Java 9+)**: backing field is `byte[]` + a 1-byte coder (LATIN1 or UTF16). ASCII-heavy apps roughly halve heap usage versus the pre-9 `char[]` representation — automatic, no flag.
 - **String pool** lives in the heap (moved out of PermGen in Java 7). Literals are interned at class-load time.
-- **`intern()` caveats**: manual interning is rarely worth it in modern JVMs. Prefer `-XX:+UseStringDeduplication` (G1/ZGC) which collapses duplicate contents in the background without bloating the pool.
+- **`intern()` caveats**: manual interning is rarely worth it in modern JVMs. If heap profiles show lots of duplicate strings and you are on G1, `-XX:+UseStringDeduplication` can reduce footprint without bloating the pool.
 - **Concatenation**: `+` in a single expression is compiled to `invokedynamic` + `StringConcatFactory` (Java 9+), which picks a strategy at runtime and is usually faster than a hand-rolled `StringBuilder`. Use `StringBuilder` explicitly only inside loops.
 
 ### Autoboxing Pitfalls

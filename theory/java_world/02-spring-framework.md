@@ -1,6 +1,6 @@
 # Spring Framework — Senior Engineer Interview Preparation
 
-> **Baseline (April 2026)**: Spring Framework 6.2.x, Spring Boot 3.5.x, Spring Security 6.5.x, Spring Data 2025.x, Java 17 minimum (Java 21 recommended for virtual threads). `jakarta.*` replaces `javax.*` throughout Spring 6 / Boot 3. Spring Framework 7.0 and Spring Boot 4 are in milestone/RC; production targets remain 6.2 / 3.5.
+> **Baseline (April 2026)**: Current stable lines are Spring Framework 7.0.x, Spring Boot 4.0.x, Spring Security 7.0.x, and Spring Data 2025.1.x. Spring Boot 4 requires Java 17+ (Java 21+ recommended when you want virtual threads). `jakarta.*` replaces `javax.*` throughout Spring 6+ / Boot 3+, and that remains true in Spring 7 / Boot 4. Notes below call out 6.2 / 3.5 specifics explicitly where they matter.
 
 ---
 
@@ -106,7 +106,7 @@ MyService stubMyService() { return new StubMyService(); }
 MyExpensiveComponent myComponent() { ... }
 ```
 
-Also new in 6.2: `@Reflective` / `@RegisterReflection` / `@ReflectionScan` for ergonomic native-image hint registration, and observation instrumentation is now applied to `@Scheduled` methods.
+Also new in 6.2: `@Reflective` / `@RegisterReflection` / `@ReflectiveScan` for ergonomic native-image hint registration, and observation instrumentation is now applied to `@Scheduled` methods.
 
 ---
 
@@ -435,10 +435,11 @@ When enabled, Boot wires virtual threads into:
 ### Structured Concurrency (still preview through JDK 25, JEP 505 — 5th preview)
 
 ```java
-try (var scope = new StructuredTaskScope.ShutdownOnFailure()) {
+try (var scope = StructuredTaskScope.open(
+        StructuredTaskScope.Joiner.<Object>awaitAllSuccessfulOrThrow())) {
     Subtask<User> user = scope.fork(() -> userClient.get(id));
     Subtask<List<Order>> orders = scope.fork(() -> orderClient.list(id));
-    scope.join().throwIfFailed();
+    scope.join();   // fail-fast: cancels siblings if any subtask fails
     return new Dashboard(user.get(), orders.get());
 }
 ```
@@ -591,7 +592,7 @@ class OrderModuleTests {
 
 Solves "what happens if the listener fails after the transaction commits?" — events are persisted in a `event_publication` table inside the same transaction as the domain change (transactional outbox pattern). A re-publisher retries failed listeners on restart.
 
-**Status (April 2026)**: Modulith 1.4.x (GA for Boot 3.5), 2.0 M1 tracks Spring Boot 4 / Framework 7, 2.1 M4 adds JobRunr-backed event externalization. A common senior question: "when would you reach for Modulith vs microservices?" — answer: Modulith when the bounded contexts are real but you don't yet need independent deployability, scaling, or heterogeneous data stores.
+**Status (April 2026)**: Spring Modulith 2.0.5 is the current stable line on spring.io, 1.4.x remains maintained for the Boot 3.5 generation, and 2.1 is the current milestone line (M4). The 2.1 line adds JobRunr-backed event externalization alongside the existing JDBC-based event publication registry. A common senior question: "when would you reach for Modulith vs microservices?" — answer: Modulith when the bounded contexts are real but you don't yet need independent deployability, scaling, or heterogeneous data stores.
 
 ---
 
